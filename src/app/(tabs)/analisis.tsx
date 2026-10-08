@@ -664,7 +664,7 @@ const styles = StyleSheet.create({
 
   editIncomeText: {
     color: "#FFFFFF",
-    fontSize: 10,
+    fontSize: 15,
     fontWeight: "600",
     marginBottom: 5,
   },

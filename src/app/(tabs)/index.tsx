@@ -3,7 +3,14 @@ import * as LocalAuthentication from "expo-local-authentication";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Expense } from "../../data/expenses";
 import {
@@ -129,6 +136,16 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
+        {/* Logo */}
+
+        <View style={styles.logoContainer}>
+          <Image
+            source={require("../../../assets/images/logo-finan.png")}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+        </View>
+
         {/* Encabezado */}
 
         <View style={styles.header}>
@@ -366,7 +383,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 10,
+    marginTop: 0,
     marginBottom: 20,
   },
 
@@ -657,5 +674,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     color: "#7C3AED",
+  },
+  logoContainer: {
+    alignItems: "center",
+    height: 80,
+    marginTop: -5,
+    marginBottom: 0,
+  },
+  logo: {
+    width: 250,
+    height: 100,
   },
 });
