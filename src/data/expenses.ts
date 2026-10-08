@@ -10,6 +10,8 @@ export type Expense = {
   paymentMethod: string;
   note: string;
   zone: string;
+  latitude?: number;
+  longitude?: number;
 };
 
 export const expenses: Expense[] = [

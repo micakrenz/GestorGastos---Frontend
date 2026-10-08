@@ -27,7 +27,7 @@ export default function GastosScreen() {
           if (storedExpenses) {
             setExpenses(JSON.parse(storedExpenses));
           }
-        } catch (error) {
+        } catch {
         } finally {
           setIsHydrated(true);
         }
@@ -36,6 +36,11 @@ export default function GastosScreen() {
       loadExpenses();
     }, []),
   );
+
+  const categories = [
+    "Todos",
+    ...new Set(expenses.map((expense) => expense.category)),
+  ];
 
   const filteredExpenses =
     filter === "Todos"
@@ -100,7 +105,7 @@ export default function GastosScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filters}
         >
-          {["Todos", "Comida", "Transporte", "Compras"].map((item) => (
+          {categories.map((item) => (
             <Pressable
               key={item}
               onPress={() => setFilter(item)}
@@ -194,21 +199,6 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: "700",
     color: "#0D1B2A",
-  },
-
-  totalCircle: {
-    width: 45,
-    height: 45,
-    borderRadius: 23,
-    backgroundColor: "#DBEAFE",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  totalCircleText: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#2563EB",
   },
 
   summaryCard: {
@@ -307,19 +297,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     flexDirection: "row",
     alignItems: "center",
-  },
-
-  categoryIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 15,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 12,
-  },
-
-  emoji: {
-    fontSize: 22,
   },
 
   expenseInfo: {

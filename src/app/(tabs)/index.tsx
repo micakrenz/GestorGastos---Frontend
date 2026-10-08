@@ -1,7 +1,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as LocalAuthentication from "expo-local-authentication";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Expense } from "../../data/expenses";
@@ -28,6 +29,36 @@ export default function HomeScreen() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [income, setIncome] = useState(0);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAuthenticating, setIsAuthenticating] = useState(true);
+
+  useEffect(() => {
+    const authenticate = async () => {
+      try {
+        const hasHardware = await LocalAuthentication.hasHardwareAsync();
+        const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+        if (!hasHardware || !isEnrolled) {
+          setIsAuthenticated(true);
+          return;
+        }
+
+        const result = await LocalAuthentication.authenticateAsync({
+          promptMessage: "Ingresá a Finan",
+          cancelLabel: "Cancelar",
+        });
+
+        if (result.success) {
+          setIsAuthenticated(true);
+        }
+      } catch (error) {
+      } finally {
+        setIsAuthenticating(false);
+      }
+    };
+
+    authenticate();
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -59,11 +90,13 @@ export default function HomeScreen() {
     }, []),
   );
 
-  if (!isHydrated) {
+  if (!isHydrated || isAuthenticating || !isAuthenticated) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Cargando...</Text>
+          <Text style={styles.loadingText}>
+            {isAuthenticating ? "Verificando identidad..." : "Cargando..."}
+          </Text>
         </View>
       </SafeAreaView>
     );
@@ -101,10 +134,6 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.title}>Tus gastos</Text>
-          </View>
-
-          <View style={styles.profileCircle}>
-            <Text style={styles.profileText}>M</Text>
           </View>
         </View>
 
