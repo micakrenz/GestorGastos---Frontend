@@ -1,47 +1,45 @@
 import { NativeTabs } from "expo-router/unstable-native-tabs";
-import { useColorScheme } from "react-native";
-
-import { Colors } from "@/constants/theme";
 
 export default function AppTabs() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === "unspecified" ? "light" : scheme];
-
   return (
-    <NativeTabs
-      backgroundColor={colors.background}
-      indicatorColor={colors.backgroundElement}
-      labelStyle={{ selected: { color: colors.text } }}
-    >
+    <NativeTabs>
       <NativeTabs.Trigger name="index">
-        <NativeTabs.Trigger.Label>Inicio</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label hidden />
         <NativeTabs.Trigger.Icon
-          src={require("@/assets/images/tabIcons/home.png")}
-          renderingMode="template"
+          sf={{ default: "house", selected: "house.fill" }}
+          md={{ default: "home", selected: "home_filled" }}
         />
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="gastos">
-        <NativeTabs.Trigger.Label>Gastos</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label hidden />
         <NativeTabs.Trigger.Icon
-          src={require("@/assets/images/tabIcons/explore.png")}
-          renderingMode="template"
+          sf={{ default: "wallet.pass", selected: "wallet.pass.fill" }}
+          md={{
+            default: "account_balance_wallet",
+            selected: "account_balance_wallet",
+          }}
         />
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="agregar">
+        <NativeTabs.Trigger.Label hidden />
+        <NativeTabs.Trigger.Icon sf="plus" md="add" />
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="analisis">
-        <NativeTabs.Trigger.Label>Análisis</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label hidden />
         <NativeTabs.Trigger.Icon
-          src={require("@/assets/images/tabIcons/explore.png")}
-          renderingMode="template"
+          sf={{ default: "chart.bar", selected: "chart.bar.fill" }}
+          md={{ default: "bar_chart", selected: "bar_chart" }}
         />
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="perfil">
-        <NativeTabs.Trigger.Label>Perfil</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Label hidden />
         <NativeTabs.Trigger.Icon
-          src={require("@/assets/images/tabIcons/home.png")}
-          renderingMode="template"
+          sf={{ default: "person", selected: "person.fill" }}
+          md={{ default: "person", selected: "person" }}
         />
       </NativeTabs.Trigger>
     </NativeTabs>

@@ -1,91 +1,66 @@
-import { useRouter } from "expo-router";
-import { useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Expense, expenses as initialExpenses } from "../../data/expenses";
 
-type Expense = {
-  id: number;
-  category: string;
-  emoji: string;
-  description: string;
-  time: string;
-  amount: string;
-  color: string;
-  date: string;
-};
-
-const expenses: Expense[] = [
-  {
-    id: 1,
-    category: "Comida",
-    emoji: "🍔",
-    description: "McDonald's",
-    time: "12:45",
-    amount: "$12.500",
-    color: "#F97316",
-    date: "Hoy",
-  },
-  {
-    id: 2,
-    category: "Transporte",
-    emoji: "🚗",
-    description: "Uber",
-    time: "09:20",
-    amount: "$8.500",
-    color: "#3B82F6",
-    date: "Hoy",
-  },
-  {
-    id: 3,
-    category: "Compras",
-    emoji: "🛍️",
-    description: "Zara",
-    time: "18:30",
-    amount: "$24.000",
-    color: "#A855F7",
-    date: "Ayer",
-  },
-  {
-    id: 4,
-    category: "Entretenimiento",
-    emoji: "🎬",
-    description: "Cine",
-    time: "21:15",
-    amount: "$9.500",
-    color: "#EC4899",
-    date: "Ayer",
-  },
-  {
-    id: 5,
-    category: "Comida",
-    emoji: "☕",
-    description: "Starbucks",
-    time: "16:10",
-    amount: "$6.500",
-    color: "#F97316",
-    date: "12 Sep",
-  },
-  {
-    id: 6,
-    category: "Otros",
-    emoji: "💊",
-    description: "Farmacia",
-    time: "11:05",
-    amount: "$7.800",
-    color: "#10B981",
-    date: "12 Sep",
-  },
-];
+const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
 
 export default function GastosScreen() {
   const router = useRouter();
 
+  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
+
   const [filter, setFilter] = useState("Todos");
+
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  // Cargar los gastos guardados
+  useFocusEffect(
+    useCallback(() => {
+      const loadExpenses = async () => {
+        try {
+          const storedExpenses =
+            await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
+
+          if (storedExpenses) {
+            setExpenses(JSON.parse(storedExpenses));
+          }
+        } catch (error) {
+        } finally {
+          setIsHydrated(true);
+        }
+      };
+
+      loadExpenses();
+    }, []),
+  );
 
   const filteredExpenses =
     filter === "Todos"
       ? expenses
       : expenses.filter((expense) => expense.category === filter);
+
+  const totalAmount = expenses.reduce((total, expense) => {
+    const numericAmount = Number(
+      expense.amount.replace("$", "").replace(".", ""),
+    );
+
+    return total + numericAmount;
+  }, 0);
+
+  const formattedTotal = `$${totalAmount.toLocaleString("es-AR")}`;
+
+  if (!isHydrated) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Cargando gastos...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -97,11 +72,8 @@ export default function GastosScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.smallTitle}>Septiembre 2026</Text>
-            <Text style={styles.title}>Mis gastos</Text>
-          </View>
 
-          <View style={styles.totalCircle}>
-            <Text style={styles.totalCircleText}>$</Text>
+            <Text style={styles.title}>Mis gastos</Text>
           </View>
         </View>
 
@@ -109,11 +81,13 @@ export default function GastosScreen() {
         <View style={styles.summaryCard}>
           <View>
             <Text style={styles.summaryLabel}>Total gastado</Text>
-            <Text style={styles.summaryAmount}>$185.450</Text>
+
+            <Text style={styles.summaryAmount}>{formattedTotal}</Text>
           </View>
 
           <View style={styles.expenseCount}>
             <Text style={styles.countNumber}>{expenses.length}</Text>
+
             <Text style={styles.countLabel}>gastos</Text>
           </View>
         </View>
@@ -150,6 +124,7 @@ export default function GastosScreen() {
         {/* Lista */}
         <View style={styles.listHeader}>
           <Text style={styles.sectionTitle}>Movimientos</Text>
+
           <Text style={styles.countText}>
             {filteredExpenses.length} resultados
           </Text>
@@ -159,17 +134,15 @@ export default function GastosScreen() {
           <Pressable
             key={expense.id}
             style={styles.expenseCard}
-            onPress={() => router.push("/detalle")}
+            onPress={() =>
+              router.push({
+                pathname: "/detalle",
+                params: {
+                  id: expense.id.toString(),
+                },
+              })
+            }
           >
-            <View
-              style={[
-                styles.categoryIcon,
-                { backgroundColor: expense.color + "20" },
-              ]}
-            >
-              <Text style={styles.emoji}>{expense.emoji}</Text>
-            </View>
-
             <View style={styles.expenseInfo}>
               <Text style={styles.expenseDescription}>
                 {expense.description}
@@ -379,5 +352,16 @@ const styles = StyleSheet.create({
   expenseDate: {
     fontSize: 11,
     color: "#94A3B8",
+  },
+
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  loadingText: {
+    fontSize: 15,
+    color: "#64748B",
   },
 });
