@@ -17,61 +17,6 @@ import { Expense } from "../../data/expenses";
 
 const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
 
-const zones = [
-  "Palermo",
-  "Recoleta",
-  "Belgrano",
-  "Microcentro",
-  "Caballito",
-  "Puerto Madero",
-  "Flores",
-];
-
-const zoneInfo = [
-  {
-    name: "Palermo",
-    latitude: -34.588,
-    longitude: -58.41,
-    radius: 900,
-  },
-  {
-    name: "Recoleta",
-    latitude: -34.588,
-    longitude: -58.397,
-    radius: 750,
-  },
-  {
-    name: "Belgrano",
-    latitude: -34.565,
-    longitude: -58.455,
-    radius: 650,
-  },
-  {
-    name: "Microcentro",
-    latitude: -34.603,
-    longitude: -58.382,
-    radius: 550,
-  },
-  {
-    name: "Caballito",
-    latitude: -34.615,
-    longitude: -58.435,
-    radius: 450,
-  },
-  {
-    name: "Puerto Madero",
-    latitude: -34.611,
-    longitude: -58.362,
-    radius: 500,
-  },
-  {
-    name: "Flores",
-    latitude: -34.628,
-    longitude: -58.462,
-    radius: 1500,
-  },
-];
-
 const categories = [
   { name: "Comida", color: "#F97316" },
   { name: "Transporte", color: "#3B82F6" },
@@ -81,51 +26,6 @@ const categories = [
 ];
 
 const paymentMethods = ["Tarjeta de débito", "Tarjeta de crédito", "Efectivo"];
-
-function getDistanceInMeters(
-  latitude1: number,
-  longitude1: number,
-  latitude2: number,
-  longitude2: number,
-) {
-  const earthRadius = 6371000;
-
-  const latitudeDifference = ((latitude2 - latitude1) * Math.PI) / 180;
-
-  const longitudeDifference = ((longitude2 - longitude1) * Math.PI) / 180;
-
-  const latitude1InRadians = (latitude1 * Math.PI) / 180;
-
-  const latitude2InRadians = (latitude2 * Math.PI) / 180;
-
-  const a =
-    Math.sin(latitudeDifference / 2) * Math.sin(latitudeDifference / 2) +
-    Math.cos(latitude1InRadians) *
-      Math.cos(latitude2InRadians) *
-      Math.sin(longitudeDifference / 2) *
-      Math.sin(longitudeDifference / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return earthRadius * c;
-}
-
-function getZoneFromLocation(latitude: number, longitude: number) {
-  const matchingZones = zoneInfo
-    .map((zone) => ({
-      ...zone,
-      distance: getDistanceInMeters(
-        latitude,
-        longitude,
-        zone.latitude,
-        zone.longitude,
-      ),
-    }))
-    .filter((zone) => zone.distance <= zone.radius)
-    .sort((a, b) => a.distance - b.distance);
-
-  return matchingZones[0]?.name ?? null;
-}
 
 export default function AgregarScreen() {
   const router = useRouter();
@@ -153,7 +53,7 @@ export default function AgregarScreen() {
       if (status !== "granted") {
         Alert.alert(
           "Permiso de ubicación",
-          "Necesitamos acceso a tu ubicación para asociarla al gasto.",
+          "No se obtuvo la ubicación. Podés continuar y guardar el gasto sin ubicación.",
         );
         return;
       }
@@ -165,45 +65,41 @@ export default function AgregarScreen() {
       const latitude = currentLocation.coords.latitude;
       const longitude = currentLocation.coords.longitude;
 
-      const detectedZone = getZoneFromLocation(latitude, longitude);
+      const response = await fetch(
+        `https://apis.datos.gob.ar/georef/api/v2.0/ubicacion?lat=${latitude}&lon=${longitude}`,
+      );
+      if (!response.ok) throw new Error("No se pudo consultar Georef");
+      const data = await response.json();
+      const ubicacion = data?.ubicacion;
+      const detectedZone =
+        ubicacion?.barrio?.nombre ??
+        ubicacion?.localidad_censal?.nombre ??
+        ubicacion?.localidad?.nombre ??
+        ubicacion?.municipio?.nombre ??
+        ubicacion?.departamento?.nombre ??
+        ubicacion?.provincia?.nombre;
 
       if (!detectedZone) {
-        setLocation(null);
+        setLocation({ latitude, longitude });
         setZone("");
-
         Alert.alert(
           "Zona no identificada",
-          "Tu ubicación está fuera de las zonas disponibles. Podés seleccionar una zona manualmente.",
+          "Se guardaron las coordenadas GPS, pero no pudimos identificar el barrio. Podés guardar el gasto sin una zona.",
         );
-
         return;
       }
 
-      setLocation({
-        latitude,
-        longitude,
-      });
-
+      setLocation({ latitude, longitude });
       setZone(detectedZone);
-
-      Alert.alert(
-        "Ubicación obtenida",
-        `Detectamos que estás en ${detectedZone}.`,
-      );
+      Alert.alert("Ubicación obtenida", `La API identificó: ${detectedZone}.`);
     } catch (error) {
-      Alert.alert("Error", "No se pudo obtener tu ubicación actual.");
+      Alert.alert(
+        "Ubicación no disponible",
+        "No se pudo obtener tu ubicación actual. Podés guardar el gasto sin ubicación.",
+      );
     } finally {
       setLocationLoading(false);
     }
-  };
-
-  const handleSelectZone = (selectedZone: string) => {
-    setZone(selectedZone);
-
-    // Si el usuario elige manualmente una zona,
-    // eliminamos las coordenadas obtenidas anteriormente
-    // para evitar inconsistencias.
-    setLocation(null);
   };
 
   const handleSaveExpense = async () => {
@@ -219,14 +115,6 @@ export default function AgregarScreen() {
 
     if (!numericAmount || numericAmount <= 0) {
       Alert.alert("Monto inválido", "Ingresá un monto mayor a $0.");
-      return;
-    }
-
-    if (!zone) {
-      Alert.alert(
-        "Ubicación requerida",
-        "Seleccioná una zona o usá tu ubicación actual.",
-      );
       return;
     }
 
@@ -458,34 +346,6 @@ export default function AgregarScreen() {
                 <Text style={styles.detectedLocationText}>{zone}</Text>
               </View>
             ) : null}
-
-            <Text style={styles.orText}>O seleccioná una zona manualmente</Text>
-
-            <View style={styles.optionsContainer}>
-              {zones.map((item) => {
-                const isSelected = zone === item;
-
-                return (
-                  <Pressable
-                    key={item}
-                    onPress={() => handleSelectZone(item)}
-                    style={[
-                      styles.optionButton,
-                      isSelected && styles.optionButtonActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.optionText,
-                        isSelected && styles.optionTextActive,
-                      ]}
-                    >
-                      {item}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
           </View>
 
           <View style={styles.section}>
@@ -687,12 +547,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#065F46",
     fontWeight: "700",
-    marginTop: 2,
-  },
-
-  orText: {
-    fontSize: 13,
-    color: "#64748B",
     marginTop: 2,
   },
 

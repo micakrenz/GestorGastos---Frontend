@@ -2,6 +2,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
+  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -27,6 +28,12 @@ import {
 
 const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
 const INCOME_STORAGE_KEY = "gestor-gastos-ingresos";
+const INCOME_MONTH_STORAGE_KEY = "gestor-gastos-ingresos-mes";
+
+const getCurrentMonthKey = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
 
 const categoryColors: Record<string, string> = {
   Comida: "#F97316",
@@ -237,6 +244,8 @@ export default function AnalisisScreen() {
   const [incomeInput, setIncomeInput] = useState("");
 
   const [incomeError, setIncomeError] = useState("");
+  const [incomeRegisteredThisMonth, setIncomeRegisteredThisMonth] =
+    useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -251,10 +260,27 @@ export default function AnalisisScreen() {
             setExpenses([]);
           }
 
-          const storedIncome = await AsyncStorage.getItem(INCOME_STORAGE_KEY);
+          const [storedIncome, storedIncomeMonth] = await Promise.all([
+            AsyncStorage.getItem(INCOME_STORAGE_KEY),
+            AsyncStorage.getItem(INCOME_MONTH_STORAGE_KEY),
+          ]);
 
           if (storedIncome) {
             setIncome(Number(storedIncome));
+            if (storedIncomeMonth) {
+              setIncomeRegisteredThisMonth(
+                storedIncomeMonth === getCurrentMonthKey(),
+              );
+            } else {
+              // Compatibilidad con ingresos guardados antes de registrar el mes.
+              await AsyncStorage.setItem(
+                INCOME_MONTH_STORAGE_KEY,
+                getCurrentMonthKey(),
+              );
+              setIncomeRegisteredThisMonth(true);
+            }
+          } else {
+            setIncomeRegisteredThisMonth(false);
           }
         } catch (error) {}
       };
@@ -343,7 +369,14 @@ export default function AnalisisScreen() {
    */
 
   const openIncomeModal = () => {
-    setIncomeInput(income > 0 ? income.toString() : "");
+    if (incomeRegisteredThisMonth) {
+      Alert.alert(
+        "Ingresos ya registrados",
+        "Podés registrar tus ingresos una sola vez por mes. Vas a poder ingresarlos nuevamente el mes que viene.",
+      );
+      return;
+    }
+    setIncomeInput("");
     setIncomeError("");
     setIncomeModalVisible(true);
   };
@@ -356,13 +389,29 @@ export default function AnalisisScreen() {
       return;
     }
 
+    if (incomeRegisteredThisMonth) {
+      setIncomeError(
+        "Ya registraste tus ingresos este mes. Podés volver a hacerlo el mes que viene.",
+      );
+      return;
+    }
+
     try {
       await AsyncStorage.setItem(INCOME_STORAGE_KEY, numericIncome.toString());
+      await AsyncStorage.setItem(
+        INCOME_MONTH_STORAGE_KEY,
+        getCurrentMonthKey(),
+      );
 
       setIncome(numericIncome);
+      setIncomeRegisteredThisMonth(true);
       setIncomeModalVisible(false);
       setIncomeError("");
-    } catch (error) {}
+    } catch (error) {
+      setIncomeError(
+        "No se pudieron guardar los ingresos. Intentá nuevamente.",
+      );
+    }
   };
 
   const highestCategory = categories.length > 0 ? categories[0] : null;
@@ -400,10 +449,6 @@ export default function AnalisisScreen() {
             <View style={styles.summaryItem}>
               <View style={styles.incomeHeader}>
                 <Text style={styles.summaryLabel}>Ingresos</Text>
-
-                <TouchableOpacity onPress={openIncomeModal} activeOpacity={0.7}>
-                  <Text style={styles.editIncomeText}>Editar</Text>
-                </TouchableOpacity>
               </View>
 
               <Text style={styles.incomeAmount}>{formatCurrency(income)}</Text>
@@ -423,6 +468,40 @@ export default function AnalisisScreen() {
               <Text style={styles.savingsBadgeText}>{savingsPercentage}%</Text>
             </View>
           </View>
+        </View>
+
+        <View style={styles.incomeActionSection}>
+          <View style={styles.incomeActionCopy}>
+            <Text style={styles.incomeActionTitle}>
+              {incomeRegisteredThisMonth
+                ? "Ingresos registrados"
+                : "¿Todavía no registraste tus ingresos?"}
+            </Text>
+            <Text style={styles.incomeHelperText}>
+              {incomeRegisteredThisMonth
+                ? "Podrás registrarlos nuevamente el próximo mes."
+                : "Registralos una vez al mes para calcular tu ahorro."}
+            </Text>
+          </View>
+          <TouchableOpacity
+            onPress={openIncomeModal}
+            activeOpacity={0.7}
+            disabled={incomeRegisteredThisMonth}
+            style={[
+              styles.incomeActionButton,
+              incomeRegisteredThisMonth && styles.incomeActionButtonDisabled,
+            ]}
+          >
+            <Text
+              style={[
+                styles.incomeActionButtonText,
+                incomeRegisteredThisMonth &&
+                  styles.incomeActionButtonTextDisabled,
+              ]}
+            >
+              {incomeRegisteredThisMonth ? "Registrados ✓" : "+ Registrar"}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* GASTOS POR CATEGORÍA */}
@@ -542,10 +621,11 @@ export default function AnalisisScreen() {
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Editar ingresos</Text>
+            <Text style={styles.modalTitle}>Registrar ingresos</Text>
 
             <Text style={styles.modalDescription}>
-              Ingresá el monto de tus ingresos mensuales.
+              Ingresá tus ingresos mensuales. Solo podés registrarlos una vez
+              por mes.
             </Text>
 
             <TextInput
@@ -662,11 +742,61 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
 
-  editIncomeText: {
+  incomeActionSection: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginTop: -10,
+    marginBottom: 27,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+
+  incomeActionCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+
+  incomeActionTitle: {
+    color: "#0D1B2A",
+    fontSize: 13,
+    fontWeight: "700",
+  },
+
+  incomeActionButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: "#2563EB",
+    flexShrink: 0,
+  },
+
+  incomeActionButtonDisabled: {
+    backgroundColor: "#DBEAFE",
+  },
+
+  incomeActionButtonText: {
     color: "#FFFFFF",
-    fontSize: 15,
+    fontSize: 12,
     fontWeight: "600",
-    marginBottom: 5,
+  },
+
+  incomeActionButtonTextDisabled: {
+    color: "#1D4ED8",
+  },
+
+  incomeHelperText: {
+    color: "#64748B",
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
   },
 
   summaryAmount: {

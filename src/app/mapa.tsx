@@ -12,7 +12,8 @@ type Frequency = "Baja" | "Media" | "Alta";
 
 type Zone = {
   name: string;
-  frequency: number;
+  amount: number;
+  percentage: number;
   level: Frequency;
   latitude: number;
   longitude: number;
@@ -74,15 +75,9 @@ const zoneInfo: ZoneInfo[] = [
 
 const filters: ("Todos" | Frequency)[] = ["Todos", "Baja", "Media", "Alta"];
 
-function getFrequencyLevel(frequency: number): Frequency {
-  if (frequency <= 4) {
-    return "Baja";
-  }
-
-  if (frequency <= 9) {
-    return "Media";
-  }
-
+function getFrequencyLevel(percentage: number): Frequency {
+  if (percentage < 10) return "Baja";
+  if (percentage < 25) return "Media";
   return "Alta";
 }
 
@@ -119,29 +114,60 @@ export default function MapaScreen() {
           const expenses: Expense[] = storedExpenses
             ? JSON.parse(storedExpenses)
             : [];
+          const getAmount = (value: string) =>
+            Number(value.replace(/[^0-9]/g, "")) || 0;
+          const totalSpent = expenses.reduce(
+            (sum, expense) => sum + getAmount(expense.amount),
+            0,
+          );
+          const zoneNames = [
+            ...new Set(expenses.map((expense) => expense.zone).filter(Boolean)),
+          ];
 
-          const calculatedZones: Zone[] = zoneInfo
-            .map((zone) => {
+          const calculatedZones: Zone[] = zoneNames
+            .map((zoneName) => {
               const zoneExpenses = expenses.filter(
-                (expense) => expense.zone === zone.name,
+                (expense) => expense.zone === zoneName,
               );
-
-              const frequency = zoneExpenses.length;
-              const level = getFrequencyLevel(frequency);
+              const amount = zoneExpenses.reduce(
+                (sum, expense) => sum + getAmount(expense.amount),
+                0,
+              );
+              const percentage =
+                totalSpent > 0 ? (amount / totalSpent) * 100 : 0;
+              const level = getFrequencyLevel(percentage);
               const color = getFrequencyColor(level);
+              const expenseWithCoordinates = zoneExpenses.find(
+                (expense) =>
+                  typeof (expense as Expense & { latitude?: number })
+                    .latitude === "number" &&
+                  typeof (expense as Expense & { longitude?: number })
+                    .longitude === "number",
+              ) as
+                | (Expense & { latitude?: number; longitude?: number })
+                | undefined;
+              const fallback = zoneInfo.find((zone) => zone.name === zoneName);
+
+              // Los gastos nuevos usan coordenadas del GPS; los antiguos conservan sus coordenadas aproximadas.
+              const latitude =
+                expenseWithCoordinates?.latitude ?? fallback?.latitude;
+              const longitude =
+                expenseWithCoordinates?.longitude ?? fallback?.longitude;
+              if (latitude === undefined || longitude === undefined)
+                return null;
 
               return {
-                name: zone.name,
-                frequency,
+                name: zoneName,
+                amount,
+                percentage: Math.round(percentage),
                 level,
-                latitude: zone.latitude,
-                longitude: zone.longitude,
-                radius: zone.radius,
+                latitude,
+                longitude,
+                radius: Math.max(300, Math.min(1800, 300 + percentage * 20)),
                 color,
               };
             })
-            .filter((zone) => zone.frequency > 0);
-
+            .filter((zone): zone is Zone => zone !== null && zone.amount > 0);
           setZones(calculatedZones);
 
           setSelectedZone((currentSelectedZone) => {
@@ -181,9 +207,7 @@ export default function MapaScreen() {
 
         <View style={styles.headerText}>
           <Text style={styles.title}>Mapa de gastos</Text>
-          <Text style={styles.subtitle}>
-            Distribución de tus gastos por zona
-          </Text>
+          <Text style={styles.subtitle}>Distribución del gasto por zona</Text>
         </View>
       </View>
 
@@ -287,7 +311,7 @@ export default function MapaScreen() {
                       },
                     ]}
                   >
-                    {zone.frequency}
+                    {zone.percentage}%
                   </Text>
                 </View>
               </Marker>
@@ -312,8 +336,8 @@ export default function MapaScreen() {
               <Text style={styles.selectedName}>{selectedZone.name}</Text>
 
               <Text style={styles.selectedFrequency}>
-                {selectedZone.frequency}{" "}
-                {selectedZone.frequency === 1 ? "gasto" : "gastos"}
+                {selectedZone.percentage}% del gasto total · $
+                {selectedZone.amount.toLocaleString("es-AR")}
               </Text>
             </View>
 
@@ -342,7 +366,7 @@ export default function MapaScreen() {
       {/* Leyenda */}
 
       <View style={styles.legendCard}>
-        <Text style={styles.legendTitle}>Frecuencia de gastos</Text>
+        <Text style={styles.legendTitle}>Porcentaje del gasto total</Text>
 
         <View style={styles.legendRow}>
           {/* Baja */}
@@ -353,7 +377,7 @@ export default function MapaScreen() {
             <View>
               <Text style={styles.legendLabel}>Baja</Text>
 
-              <Text style={styles.legendDescription}>1–4 gastos</Text>
+              <Text style={styles.legendDescription}>&lt;10%</Text>
             </View>
           </View>
 
@@ -365,7 +389,7 @@ export default function MapaScreen() {
             <View>
               <Text style={styles.legendLabel}>Media</Text>
 
-              <Text style={styles.legendDescription}>5–9 gastos</Text>
+              <Text style={styles.legendDescription}>10%–&lt;25%</Text>
             </View>
           </View>
 
@@ -377,7 +401,7 @@ export default function MapaScreen() {
             <View>
               <Text style={styles.legendLabel}>Alta</Text>
 
-              <Text style={styles.legendDescription}>10+ gastos</Text>
+              <Text style={styles.legendDescription}>25% o más</Text>
             </View>
           </View>
         </View>

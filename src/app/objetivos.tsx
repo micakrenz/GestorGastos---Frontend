@@ -36,6 +36,12 @@ const initialGoals: Goal[] = [
 ];
 
 const GOALS_STORAGE_KEY = "gestor-gastos-objetivos";
+const GOAL_MOVEMENTS_STORAGE_KEY = "gestor-gastos-movimientos-objetivos";
+
+const getCurrentMonthKey = () => {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+};
 
 export default function ObjetivosScreen() {
   const router = useRouter();
@@ -101,7 +107,7 @@ export default function ObjetivosScreen() {
     setAmount("");
   };
 
-  const handleAmountChange = () => {
+  const handleAmountChange = async () => {
     if (!selectedGoal) {
       return;
     }
@@ -113,57 +119,47 @@ export default function ObjetivosScreen() {
       return;
     }
 
-    setGoals((currentGoals) =>
-      currentGoals.map((goal) => {
-        if (goal.id !== selectedGoal.id) {
-          return goal;
-        }
+    const currentGoal = goals.find((goal) => goal.id === selectedGoal.id);
+    if (!currentGoal) return;
 
-        let newCurrent = goal.current;
+    let newCurrent = currentGoal.current;
+    if (operation === "subtract") {
+      if (numericAmount > currentGoal.current) {
+        Alert.alert(
+          "Monto inválido",
+          `No podés restar $${numericAmount.toLocaleString("es-AR")} porque actualmente tenés $${currentGoal.current.toLocaleString("es-AR")} ahorrados.`,
+        );
+        return;
+      }
+      newCurrent -= numericAmount;
+    } else {
+      const remaining = currentGoal.target - currentGoal.current;
+      if (numericAmount > remaining) {
+        Alert.alert(
+          "Monto inválido",
+          `Solo podés agregar hasta $${remaining.toLocaleString("es-AR")} para alcanzar tu objetivo.`,
+        );
+        return;
+      }
+      newCurrent += numericAmount;
+    }
 
-        if (operation === "subtract") {
-          if (numericAmount > goal.current) {
-            Alert.alert(
-              "Monto inválido",
-              `No podés restar $${numericAmount.toLocaleString(
-                "es-AR",
-              )} porque actualmente tenés $${goal.current.toLocaleString(
-                "es-AR",
-              )} ahorrados.`,
-            );
+    try {
+      const storedMovements = await AsyncStorage.getItem(GOAL_MOVEMENTS_STORAGE_KEY);
+      const movements: Record<string, number> = storedMovements ? JSON.parse(storedMovements) : {};
+      const monthKey = getCurrentMonthKey();
+      const signedAmount = operation === "add" ? numericAmount : -numericAmount;
+      movements[monthKey] = (Number(movements[monthKey]) || 0) + signedAmount;
+      await AsyncStorage.setItem(GOAL_MOVEMENTS_STORAGE_KEY, JSON.stringify(movements));
 
-            return goal;
-          }
-
-          newCurrent = goal.current - numericAmount;
-        }
-
-        if (operation === "add") {
-          const remaining = goal.target - goal.current;
-
-          if (numericAmount > remaining) {
-            Alert.alert(
-              "Monto inválido",
-              `Solo podés agregar hasta $${remaining.toLocaleString(
-                "es-AR",
-              )} para alcanzar tu objetivo.`,
-            );
-
-            return goal;
-          }
-
-          newCurrent = goal.current + numericAmount;
-        }
-
-        return {
-          ...goal,
-          current: newCurrent,
-        };
-      }),
-    );
-
-    setSelectedGoal(null);
-    setAmount("");
+      setGoals((currentGoals) => currentGoals.map((goal) =>
+        goal.id === selectedGoal.id ? { ...goal, current: newCurrent } : goal,
+      ));
+      setSelectedGoal(null);
+      setAmount("");
+    } catch (error) {
+      Alert.alert("Error", "No se pudo guardar el movimiento del objetivo.");
+    }
   };
 
   // --------------------------------------------------

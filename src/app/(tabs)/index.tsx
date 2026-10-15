@@ -12,7 +12,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Expense } from "../../data/expenses";
+import { Expense, expenses as sampleExpenses } from "../../data/expenses";
 import {
   getExpensesByCategory,
   getGrowthPercentage,
@@ -20,7 +20,9 @@ import {
 } from "../../utils/expenseUtils";
 
 const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
+const SAMPLE_EXPENSES_MIGRATION_KEY = "gestor-gastos-muestras-inicializadas";
 const INCOME_STORAGE_KEY = "gestor-gastos-ingresos";
+const BUDGET_STORAGE_KEY = "gestor-gastos-presupuesto";
 
 const categoryColors: Record<string, string> = {
   Comida: "#F97316",
@@ -35,6 +37,10 @@ export default function HomeScreen() {
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [income, setIncome] = useState(0);
+  const [monthlyBudget, setMonthlyBudget] = useState(250000);
+  const [categoryBudgets, setCategoryBudgets] = useState<
+    Record<string, number>
+  >({});
   const [isHydrated, setIsHydrated] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
@@ -71,21 +77,51 @@ export default function HomeScreen() {
     useCallback(() => {
       const loadExpenses = async () => {
         try {
-          const storedExpenses =
-            await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
+          const [storedExpenses, samplesInitialized] = await Promise.all([
+            AsyncStorage.getItem(EXPENSES_STORAGE_KEY),
+            AsyncStorage.getItem(SAMPLE_EXPENSES_MIGRATION_KEY),
+          ]);
 
-          if (storedExpenses) {
-            setExpenses(JSON.parse(storedExpenses));
-          } else {
-            setExpenses([]);
+          let savedExpenses: Expense[] = storedExpenses
+            ? JSON.parse(storedExpenses)
+            : [];
+
+          // Incorporamos los gastos de ejemplo una sola vez, sin pisar los nuevos.
+          if (samplesInitialized !== "true") {
+            const savedIds = new Set(
+              savedExpenses.map((expense) => expense.id),
+            );
+            const missingSamples = sampleExpenses.filter(
+              (expense) => !savedIds.has(expense.id),
+            );
+
+            savedExpenses = [...savedExpenses, ...missingSamples];
+
+            await AsyncStorage.setItem(
+              EXPENSES_STORAGE_KEY,
+              JSON.stringify(savedExpenses),
+            );
+            await AsyncStorage.setItem(SAMPLE_EXPENSES_MIGRATION_KEY, "true");
           }
 
-          const storedIncome = await AsyncStorage.getItem(INCOME_STORAGE_KEY);
+          setExpenses(savedExpenses);
 
-          if (storedIncome) {
-            setIncome(Number(storedIncome));
+          const storedIncome = await AsyncStorage.getItem(INCOME_STORAGE_KEY);
+          setIncome(storedIncome ? Number(storedIncome) : 0);
+
+          const storedBudget = await AsyncStorage.getItem(BUDGET_STORAGE_KEY);
+          if (storedBudget) {
+            const parsedBudget = JSON.parse(storedBudget);
+            setMonthlyBudget(Number(parsedBudget.monthly) || 250000);
+            setCategoryBudgets(parsedBudget.categories ?? {});
           } else {
-            setIncome(0);
+            setMonthlyBudget(250000);
+            setCategoryBudgets({
+              Comida: 80000,
+              Transporte: 50000,
+              Compras: 40000,
+              Entretenimiento: 30000,
+            });
           }
         } catch (error) {
         } finally {
@@ -121,6 +157,14 @@ export default function HomeScreen() {
   const formattedSavings = `$${savings.toLocaleString("es-AR")}`;
 
   const categoryTotals = getExpensesByCategory(expenses);
+  const monthlyUsage =
+    monthlyBudget > 0 ? (totalAmount / monthlyBudget) * 100 : 0;
+  const monthlyRemaining = monthlyBudget - totalAmount;
+  const categoryOverages = Object.entries(categoryBudgets)
+    .map(([name, limit]) => ({ name, limit, spent: categoryTotals[name] ?? 0 }))
+    .filter((item) => item.spent > item.limit);
+  const nearMonthlyLimit = monthlyUsage >= 80 && monthlyUsage <= 100;
+  const overMonthlyLimit = monthlyUsage > 100;
 
   const categories = [
     "Comida",
@@ -185,6 +229,40 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Aviso de presupuesto */}
+        {(nearMonthlyLimit ||
+          overMonthlyLimit ||
+          categoryOverages.length > 0) && (
+          <View
+            style={[
+              styles.budgetFeedback,
+              overMonthlyLimit || categoryOverages.length > 0
+                ? styles.budgetFeedbackDanger
+                : styles.budgetFeedbackWarning,
+            ]}
+          >
+            <Text style={styles.budgetFeedbackTitle}>
+              {overMonthlyLimit
+                ? "Superaste tu presupuesto mensual"
+                : categoryOverages.length > 0
+                  ? "Superaste el límite de una categoría"
+                  : "Estás cerca de tu límite mensual"}
+            </Text>
+            <Text style={styles.budgetFeedbackDescription}>
+              {overMonthlyLimit
+                ? `Te excediste por $${Math.abs(monthlyRemaining).toLocaleString("es-AR")}. Podés seguir registrando gastos, pero revisá tu presupuesto.`
+                : categoryOverages.length > 0
+                  ? categoryOverages
+                      .map(
+                        (item) =>
+                          `${item.name}: $${(item.spent - item.limit).toLocaleString("es-AR")} por encima del límite`,
+                      )
+                      .join(". ")
+                  : `Ya utilizaste el ${Math.round(monthlyUsage)}% de tu presupuesto. Te quedan $${Math.max(monthlyRemaining, 0).toLocaleString("es-AR")}.`}
+            </Text>
+          </View>
+        )}
+
         {/* Ingresos y ahorro */}
 
         <View style={styles.summaryRow}>
@@ -216,23 +294,27 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.categoryCard}>
-          {categories.map((category) => {
-            const amount = categoryTotals[category] ?? 0;
+          {categories
+            .map((category) => ({
+              name: category,
+              amount: categoryTotals[category] ?? 0,
+            }))
+            .sort((a, b) => b.amount - a.amount)
+            .map(({ name, amount }) => {
+              const percentage =
+                totalAmount > 0 ? Math.round((amount / totalAmount) * 100) : 0;
 
-            const percentage =
-              totalAmount > 0 ? Math.round((amount / totalAmount) * 100) : 0;
-
-            return (
-              <Category
-                key={category}
-                name={category}
-                amount={`$${amount.toLocaleString("es-AR")}`}
-                percentage={`${percentage}%`}
-                progress={totalAmount > 0 ? amount / totalAmount : 0}
-                color={categoryColors[category]}
-              />
-            );
-          })}
+              return (
+                <Category
+                  key={name}
+                  name={name}
+                  amount={`$${amount.toLocaleString("es-AR")}`}
+                  percentage={`${percentage}%`}
+                  progress={totalAmount > 0 ? amount / totalAmount : 0}
+                  color={categoryColors[name]}
+                />
+              );
+            })}
         </View>
 
         {/* Mapa de gastos */}
@@ -674,6 +756,31 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: "700",
     color: "#7C3AED",
+  },
+  budgetFeedback: {
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 18,
+    borderWidth: 1,
+  },
+  budgetFeedbackWarning: {
+    backgroundColor: "#FFFBEB",
+    borderColor: "#F59E0B",
+  },
+  budgetFeedbackDanger: {
+    backgroundColor: "#FEF2F2",
+    borderColor: "#EF4444",
+  },
+  budgetFeedbackTitle: {
+    color: "#0D1B2A",
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  budgetFeedbackDescription: {
+    color: "#475569",
+    fontSize: 12,
+    lineHeight: 18,
   },
   logoContainer: {
     alignItems: "center",

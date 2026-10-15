@@ -16,6 +16,8 @@ import { Expense } from "../data/expenses";
 
 const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
 const BUDGET_STORAGE_KEY = "gestor-gastos-presupuesto";
+const INCOME_STORAGE_KEY = "gestor-gastos-ingresos";
+const GOAL_MOVEMENTS_STORAGE_KEY = "gestor-gastos-movimientos-objetivos";
 
 const categories = [
   {
@@ -61,6 +63,10 @@ export default function PresupuestoScreen() {
   });
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [income, setIncome] = useState(0);
+  const [goalMovements, setGoalMovements] = useState<Record<string, number>>(
+    {},
+  );
 
   const [modalType, setModalType] = useState<ModalType>(null);
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -73,9 +79,16 @@ export default function PresupuestoScreen() {
         try {
           setIsLoading(true);
 
-          const [storedBudget, storedExpenses] = await Promise.all([
+          const [
+            storedBudget,
+            storedExpenses,
+            storedIncome,
+            storedGoalMovements,
+          ] = await Promise.all([
             AsyncStorage.getItem(BUDGET_STORAGE_KEY),
             AsyncStorage.getItem(EXPENSES_STORAGE_KEY),
+            AsyncStorage.getItem(INCOME_STORAGE_KEY),
+            AsyncStorage.getItem(GOAL_MOVEMENTS_STORAGE_KEY),
           ]);
 
           if (storedBudget) {
@@ -85,6 +98,10 @@ export default function PresupuestoScreen() {
           if (storedExpenses) {
             setExpenses(JSON.parse(storedExpenses));
           }
+          setIncome(storedIncome ? Number(storedIncome) : 0);
+          setGoalMovements(
+            storedGoalMovements ? JSON.parse(storedGoalMovements) : {},
+          );
         } catch (error) {
         } finally {
           setIsLoading(false);
@@ -127,12 +144,26 @@ export default function PresupuestoScreen() {
     0,
   );
 
-  const monthlyAvailable = Math.max(budget.monthly - totalSpent, 0);
+  const monthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+  const goalContributionThisMonth = Number(goalMovements[monthKey]) || 0;
+  const monthlyBalance =
+    budget.monthly - totalSpent - goalContributionThisMonth;
+  const monthlyAvailable = Math.max(monthlyBalance, 0);
 
+  const monthlyUsed = totalSpent + goalContributionThisMonth;
   const monthlyPercentage =
     budget.monthly > 0
-      ? Math.min(Math.round((totalSpent / budget.monthly) * 100), 100)
-      : 0;
+      ? Math.round((monthlyUsed / budget.monthly) * 100)
+      : monthlyUsed > 0
+        ? 100
+        : 0;
+  const allocatedCategoryBudget = Object.values(budget.categories).reduce(
+    (sum, amount) => sum + amount,
+    0,
+  );
+  const plannedSpending =
+    allocatedCategoryBudget > 0 ? allocatedCategoryBudget : budget.monthly;
+  const projectedSavings = income - plannedSpending - goalContributionThisMonth;
 
   const formatCurrency = (value: number) => {
     return `$${value.toLocaleString("es-AR")}`;
@@ -249,10 +280,7 @@ export default function PresupuestoScreen() {
       return 0;
     }
 
-    return Math.min(
-      Math.round((getCategorySpent(category) / limit) * 100),
-      100,
-    );
+    return Math.round((getCategorySpent(category) / limit) * 100);
   };
 
   if (isLoading) {
@@ -309,8 +337,15 @@ export default function PresupuestoScreen() {
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>Disponible</Text>
 
-              <Text style={[styles.statValue, styles.availableValue]}>
-                {formatCurrency(monthlyAvailable)}
+              <Text
+                style={[
+                  styles.statValue,
+                  monthlyBalance < 0
+                    ? styles.overBudgetText
+                    : styles.availableValue,
+                ]}
+              >
+                {formatCurrency(monthlyBalance)}
               </Text>
             </View>
           </View>
@@ -320,7 +355,7 @@ export default function PresupuestoScreen() {
               style={[
                 styles.progressFill,
                 {
-                  width: `${monthlyPercentage}%`,
+                  width: `${Math.min(monthlyPercentage, 100)}%`,
                 },
               ]}
             />
@@ -331,19 +366,44 @@ export default function PresupuestoScreen() {
           </Text>
         </View>
 
+        {/* AHORRO PROYECTADO */}
+        <View style={styles.projectedSavingsCard}>
+          <Text style={styles.projectedSavingsLabel}>
+            Ahorro proyectado según tus asignaciones
+          </Text>
+          <Text
+            style={[
+              styles.projectedSavingsAmount,
+              income > 0 && projectedSavings < 0 && styles.overBudgetText,
+            ]}
+          >
+            {income > 0
+              ? formatCurrency(projectedSavings)
+              : "Ingresos sin configurar"}
+          </Text>
+          <Text style={styles.projectedSavingsDescription}>
+            {income > 0
+              ? `Ingresos ${formatCurrency(income)} menos ${formatCurrency(plannedSpending)} asignados a gastos y ${formatCurrency(goalContributionThisMonth)} netos destinados a objetivos este mes. ${allocatedCategoryBudget > 0 ? "Al cambiar un límite por categoría, este cálculo se actualiza." : "Configurá límites por categoría para afinar la proyección."}`
+              : "Ingresá tus ingresos mensuales en Análisis para calcular el ahorro proyectado. Las asignaciones se actualizarán automáticamente."}
+          </Text>
+        </View>
+
         {/* ALERTA */}
-        {monthlyPercentage >= 70 && (
+        {(monthlyPercentage >= 80 || monthlyPercentage > 100) && (
           <View style={styles.alertCard}>
             <View style={styles.alertIndicator} />
 
             <View style={styles.alertTextContainer}>
               <Text style={styles.alertTitle}>
-                Estás cerca de tu límite mensual
+                {monthlyPercentage > 100
+                  ? "Superaste tu límite mensual"
+                  : "Estás cerca de tu límite mensual"}
               </Text>
 
               <Text style={styles.alertDescription}>
-                Ya utilizaste el {monthlyPercentage}% de tu presupuesto. Te
-                quedan {formatCurrency(monthlyAvailable)} disponibles.
+                {monthlyPercentage > 100
+                  ? `Te excediste por ${formatCurrency(Math.abs(Math.min(monthlyBalance, 0)))} considerando gastos y movimientos netos de objetivos. Podés seguir registrando gastos, pero revisá tus asignaciones.`
+                  : `Ya utilizaste el ${monthlyPercentage}% de tu presupuesto. Te quedan ${formatCurrency(monthlyAvailable)} disponibles.`}
               </Text>
             </View>
           </View>
@@ -390,7 +450,7 @@ export default function PresupuestoScreen() {
 
           const percentage = getCategoryPercentage(category);
 
-          const available = Math.max(limit - spent, 0);
+          const available = limit - spent;
 
           return (
             <View key={category} style={styles.categoryCard}>
@@ -446,7 +506,7 @@ export default function PresupuestoScreen() {
                   style={[
                     styles.categoryProgressFill,
                     {
-                      width: `${percentage}%`,
+                      width: `${Math.min(percentage, 100)}%`,
                       backgroundColor: color,
                     },
                   ]}
@@ -454,8 +514,15 @@ export default function PresupuestoScreen() {
               </View>
 
               <View style={styles.categoryBottom}>
-                <Text style={styles.categoryAvailable}>
-                  Disponible: {formatCurrency(available)}
+                <Text
+                  style={[
+                    styles.categoryAvailable,
+                    available < 0 && styles.overBudgetText,
+                  ]}
+                >
+                  {available < 0
+                    ? `Excedido: ${formatCurrency(Math.abs(available))}`
+                    : `Disponible: ${formatCurrency(available)}`}
                 </Text>
 
                 <Text
@@ -469,6 +536,12 @@ export default function PresupuestoScreen() {
                   {percentage}%
                 </Text>
               </View>
+              {spent > limit && (
+                <Text style={styles.categoryOverageMessage}>
+                  Superaste este límite por {formatCurrency(spent - limit)}.
+                  Podés seguir registrando gastos, pero revisá tu presupuesto.
+                </Text>
+              )}
             </View>
           );
         })}
@@ -836,6 +909,39 @@ const styles = StyleSheet.create({
     marginTop: 9,
   },
 
+  categoryOverageMessage: {
+    color: "#B91C1C",
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 8,
+  },
+  projectedSavingsCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+  },
+  projectedSavingsLabel: {
+    fontSize: 13,
+    color: "#64748B",
+    marginBottom: 6,
+  },
+  projectedSavingsAmount: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#059669",
+    marginBottom: 5,
+  },
+  projectedSavingsDescription: {
+    fontSize: 12,
+    lineHeight: 17,
+    color: "#64748B",
+  },
+  overBudgetText: {
+    color: "#DC2626",
+  },
   categoryAvailable: {
     color: "#64748B",
     fontSize: 11,
