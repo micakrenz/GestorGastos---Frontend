@@ -1,7 +1,7 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,60 +10,24 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-type User = {
-  name: string;
-  email: string;
-};
-
-const USER_STORAGE_KEY = "gestor-gastos-usuario";
+import { useAuth } from "../../context/AuthContext";
 
 export default function PerfilScreen() {
-  const [user, setUser] = useState<User | null>(null);
+  const { user, isReady, isLoading, login, register, updateProfile, logout } = useAuth();
 
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileName, setProfileName] = useState("");
 
-  const [isHydrated, setIsHydrated] = useState(false);
-
-  // Cargar la sesión guardada
-  useEffect(() => {
-    const loadUser = async () => {
-      try {
-        const storedUser = await AsyncStorage.getItem(USER_STORAGE_KEY);
-
-        if (storedUser) {
-          setUser(JSON.parse(storedUser));
-        }
-      } catch (error) {
-      } finally {
-        setIsHydrated(true);
-      }
-    };
-
-    loadUser();
-  }, []);
-
-  // Guardar la sesión cuando cambia el usuario
-  useEffect(() => {
-    if (!isHydrated) {
+  const handleSubmit = async () => {
+    if (isRegistering && !name.trim()) {
+      Alert.alert("Nombre inválido", "Ingresá tu nombre.");
       return;
     }
-
-    const saveUser = async () => {
-      try {
-        if (user) {
-          await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
-        } else {
-          await AsyncStorage.removeItem(USER_STORAGE_KEY);
-        }
-      } catch (error) {}
-    };
-
-    saveUser();
-  }, [user, isHydrated]);
-
-  const handleLogin = () => {
     if (!email.trim()) {
       Alert.alert("Email inválido", "Ingresá tu email.");
       return;
@@ -74,20 +38,20 @@ export default function PerfilScreen() {
       return;
     }
 
-    if (!password.trim()) {
-      Alert.alert("Contraseña inválida", "Ingresá tu contraseña.");
+    if (password.length < (isRegistering ? 8 : 1)) {
+      Alert.alert("Contraseña inválida", isRegistering ? "Usá al menos 8 caracteres." : "Ingresá tu contraseña.");
       return;
     }
 
-    const loggedUser: User = {
-      name: email.split("@")[0],
-      email: email.trim(),
-    };
-
-    setUser(loggedUser);
-
-    setEmail("");
-    setPassword("");
+    try {
+      if (isRegistering) await register(name.trim(), email.trim(), password);
+      else await login(email.trim(), password);
+      setName("");
+      setEmail("");
+      setPassword("");
+    } catch (error) {
+      Alert.alert(isRegistering ? "No se pudo crear la cuenta" : "No se pudo iniciar sesión", error instanceof Error ? error.message : "Intentá nuevamente.");
+    }
   };
 
   const handleLogout = () => {
@@ -99,14 +63,25 @@ export default function PerfilScreen() {
       {
         text: "Cerrar sesión",
         style: "destructive",
-        onPress: () => {
-          setUser(null);
-        },
+        onPress: () => { void logout(); },
       },
     ]);
   };
 
-  if (!isHydrated) {
+  const handleSaveProfile = async () => {
+    if (!profileName.trim()) {
+      Alert.alert("Nombre inválido", "Ingresá tu nombre.");
+      return;
+    }
+    try {
+      await updateProfile(profileName.trim());
+      setIsEditingProfile(false);
+    } catch (error) {
+      Alert.alert("No se pudo actualizar el perfil", error instanceof Error ? error.message : "Intentá nuevamente.");
+    }
+  };
+
+  if (!isReady) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.loadingContainer}>
@@ -145,25 +120,22 @@ export default function PerfilScreen() {
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Cuenta</Text>
 
-              <View style={styles.optionCard}>
+              <Pressable
+                style={styles.optionCard}
+                onPress={() => {
+                  setProfileName(user.name);
+                  setIsEditingProfile(true);
+                }}
+              >
                 <View>
                   <Text style={styles.optionTitle}>Datos de la cuenta</Text>
 
                   <Text style={styles.optionDescription}>
-                    Información asociada a tu usuario
+                    {user.name} · Tocar para editar tu nombre
                   </Text>
                 </View>
-              </View>
+              </Pressable>
 
-              <View style={styles.optionCard}>
-                <View>
-                  <Text style={styles.optionTitle}>Preferencias</Text>
-
-                  <Text style={styles.optionDescription}>
-                    Configurá tus preferencias de la aplicación
-                  </Text>
-                </View>
-              </View>
             </View>
 
             <Pressable style={styles.logoutButton} onPress={handleLogout}>
@@ -177,11 +149,16 @@ export default function PerfilScreen() {
                 <Text style={styles.loginIconText}>👤</Text>
               </View>
 
-              <Text style={styles.loginTitle}>Iniciá sesión</Text>
+              <Text style={styles.loginTitle}>{isRegistering ? "Crear cuenta" : "Iniciá sesión"}</Text>
 
               <Text style={styles.loginDescription}>
-                Ingresá a tu cuenta para administrar tu perfil.
+                {isRegistering ? "Registrate para guardar tus datos y acceder desde tu cuenta." : "Ingresá a tu cuenta para administrar tu perfil."}
               </Text>
+
+              {isRegistering && <View style={styles.inputContainer}>
+                <Text style={styles.inputLabel}>Nombre</Text>
+                <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Tu nombre" placeholderTextColor="#9CA3AF" autoCapitalize="words" />
+              </View>}
 
               <View style={styles.inputContainer}>
                 <Text style={styles.inputLabel}>Email</Text>
@@ -201,35 +178,62 @@ export default function PerfilScreen() {
               <View style={styles.inputContainer}>
                 <Text style={styles.inputLabel}>Contraseña</Text>
 
-                <TextInput
-                  style={styles.input}
-                  value={password}
-                  onChangeText={setPassword}
-                  placeholder="Ingresá tu contraseña"
-                  placeholderTextColor="#9CA3AF"
-                  secureTextEntry
-                  autoCapitalize="none"
-                />
+                <View style={styles.passwordInputRow}>
+                  <TextInput style={[styles.input, styles.passwordInput]} value={password} onChangeText={setPassword} placeholder="Ingresá tu contraseña" placeholderTextColor="#9CA3AF" secureTextEntry={!showPassword} autoCapitalize="none" autoCorrect={false} />
+                  <Pressable accessibilityRole="button" accessibilityLabel={showPassword ? "Ocultar contraseña" : "Ver contraseña"} onPress={() => setShowPassword((visible) => !visible)} style={styles.passwordToggle}>
+                    <Text style={styles.passwordToggleText}>{showPassword ? "Ocultar" : "Ver"}</Text>
+                  </Pressable>
+                </View>
               </View>
 
-              <Pressable style={styles.loginButton} onPress={handleLogin}>
-                <Text style={styles.loginButtonText}>Iniciar sesión</Text>
+              <Pressable style={styles.loginButton} onPress={handleSubmit} disabled={isLoading}>
+                <Text style={styles.loginButtonText}>{isLoading ? "Conectando..." : isRegistering ? "Crear cuenta" : "Iniciar sesión"}</Text>
               </Pressable>
             </View>
 
             <View style={styles.infoCard}>
               <Text style={styles.infoTitle}>
-                ¿Todavía no tenés una cuenta?
+                {isRegistering ? "¿Ya tenés una cuenta?" : "¿Todavía no tenés una cuenta?"}
               </Text>
 
               <Text style={styles.infoDescription}>
-                En esta versión podés ingresar directamente con tu email. La
-                autenticación real se conectará al backend más adelante.
+                {isRegistering ? "Iniciá sesión con tu email y contraseña." : "Creá una cuenta para sincronizar tus gastos."}
               </Text>
+              <Pressable onPress={() => setIsRegistering((value) => !value)} style={{ marginTop: 12 }}>
+                <Text style={{ color: "#2563EB", fontWeight: "600", textAlign: "center" }}>{isRegistering ? "Iniciar sesión" : "Crear cuenta"}</Text>
+              </Pressable>
             </View>
           </>
         )}
       </ScrollView>
+      <Modal visible={isEditingProfile} transparent animationType="fade" onRequestClose={() => setIsEditingProfile(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.editModal}>
+            <Text style={styles.optionTitle}>Editar nombre</Text>
+            <TextInput
+              style={[styles.input, styles.profileNameInput]}
+              value={profileName}
+              onChangeText={setProfileName}
+              placeholder="Tu nombre"
+              placeholderTextColor="#9CA3AF"
+              autoCapitalize="words"
+              autoFocus
+            />
+            <View style={styles.modalActions}>
+              <Pressable style={styles.cancelButton} onPress={() => setIsEditingProfile(false)}>
+                <Text style={styles.cancelText}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.loginButton, styles.saveProfileButton, isLoading && styles.disabledButton]}
+                onPress={handleSaveProfile}
+                disabled={isLoading}
+              >
+                <Text style={styles.loginButtonText}>{isLoading ? "Guardando..." : "Guardar"}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -327,6 +331,10 @@ const styles = StyleSheet.create({
     color: "#111827",
     fontSize: 15,
   },
+  passwordInputRow: { height: 50, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: "#E5E7EB", borderRadius: 14, backgroundColor: "#F9FAFB" },
+  passwordInput: { flex: 1, height: "100%", borderWidth: 0, backgroundColor: "transparent" },
+  passwordToggle: { height: "100%", justifyContent: "center", paddingHorizontal: 14 },
+  passwordToggleText: { color: "#2563EB", fontSize: 14, fontWeight: "600" },
 
   loginButton: {
     height: 50,
@@ -335,6 +343,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginTop: 6,
+  },
+
+  saveProfileButton: {
+    flex: 1,
+    marginTop: 0,
+  },
+
+  disabledButton: {
+    opacity: 0.6,
   },
 
   loginButtonText: {
@@ -467,5 +484,44 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 15,
     color: "#6B7280",
+  },
+
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 24,
+    backgroundColor: "rgba(15, 23, 42, 0.45)",
+  },
+
+  editModal: {
+    padding: 22,
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
+  },
+
+  profileNameInput: {
+    marginTop: 18,
+  },
+
+  modalActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 18,
+  },
+
+  cancelButton: {
+    flex: 1,
+    height: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: "#F1F5F9",
+  },
+
+  cancelText: {
+    color: "#334155",
+    fontSize: 15,
+    fontWeight: "600",
   },
 });

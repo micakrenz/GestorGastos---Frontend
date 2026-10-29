@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as LocalAuthentication from "expo-local-authentication";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
@@ -12,17 +11,14 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Expense, expenses as sampleExpenses } from "../../data/expenses";
+import { useAuth } from "../../context/AuthContext";
+import { Expense } from "../../data/expenses";
+import { getBudget, getExpenses, getIncome } from "../../services/api";
 import {
+  getExpenseDate,
   getExpensesByCategory,
-  getGrowthPercentage,
   getTotalExpenses,
 } from "../../utils/expenseUtils";
-
-const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
-const SAMPLE_EXPENSES_MIGRATION_KEY = "gestor-gastos-muestras-inicializadas";
-const INCOME_STORAGE_KEY = "gestor-gastos-ingresos";
-const BUDGET_STORAGE_KEY = "gestor-gastos-presupuesto";
 
 const categoryColors: Record<string, string> = {
   Comida: "#F97316",
@@ -30,10 +26,12 @@ const categoryColors: Record<string, string> = {
   Compras: "#A855F7",
   Entretenimiento: "#EC4899",
   Otros: "#10B981",
+  Objetivos: "#06B6D4",
 };
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { user, isReady } = useAuth();
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [income, setIncome] = useState(0);
@@ -42,6 +40,10 @@ export default function HomeScreen() {
     Record<string, number>
   >({});
   const [isHydrated, setIsHydrated] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(true);
 
@@ -75,62 +77,57 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      if (!isReady || !user) return;
+
       const loadExpenses = async () => {
         try {
-          const [storedExpenses, samplesInitialized] = await Promise.all([
-            AsyncStorage.getItem(EXPENSES_STORAGE_KEY),
-            AsyncStorage.getItem(SAMPLE_EXPENSES_MIGRATION_KEY),
-          ]);
+          const [expensesResult, incomeResult, budgetResult] =
+            await Promise.allSettled([
+              getExpenses(),
+              getIncome(
+                selectedMonth.getFullYear(),
+                selectedMonth.getMonth() + 1,
+              ),
+              getBudget(
+                selectedMonth.getFullYear(),
+                selectedMonth.getMonth() + 1,
+              ),
+            ]);
 
-          let savedExpenses: Expense[] = storedExpenses
-            ? JSON.parse(storedExpenses)
-            : [];
-
-          // Incorporamos los gastos de ejemplo una sola vez, sin pisar los nuevos.
-          if (samplesInitialized !== "true") {
-            const savedIds = new Set(
-              savedExpenses.map((expense) => expense.id),
-            );
-            const missingSamples = sampleExpenses.filter(
-              (expense) => !savedIds.has(expense.id),
-            );
-
-            savedExpenses = [...savedExpenses, ...missingSamples];
-
-            await AsyncStorage.setItem(
-              EXPENSES_STORAGE_KEY,
-              JSON.stringify(savedExpenses),
-            );
-            await AsyncStorage.setItem(SAMPLE_EXPENSES_MIGRATION_KEY, "true");
-          }
-
-          setExpenses(savedExpenses);
-
-          const storedIncome = await AsyncStorage.getItem(INCOME_STORAGE_KEY);
-          setIncome(storedIncome ? Number(storedIncome) : 0);
-
-          const storedBudget = await AsyncStorage.getItem(BUDGET_STORAGE_KEY);
-          if (storedBudget) {
-            const parsedBudget = JSON.parse(storedBudget);
-            setMonthlyBudget(Number(parsedBudget.monthly) || 250000);
-            setCategoryBudgets(parsedBudget.categories ?? {});
+          if (expensesResult.status === "fulfilled") {
+            setExpenses(expensesResult.value);
           } else {
-            setMonthlyBudget(250000);
-            setCategoryBudgets({
-              Comida: 80000,
-              Transporte: 50000,
-              Compras: 40000,
-              Entretenimiento: 30000,
-            });
+            console.warn(
+              "No se pudieron cargar los gastos:",
+              expensesResult.reason,
+            );
           }
-        } catch (error) {
+
+          if (incomeResult.status === "fulfilled") {
+            setIncome(incomeResult.value.amount);
+          } else {
+            console.warn(
+              "No se pudieron cargar los ingresos:",
+              incomeResult.reason,
+            );
+          }
+
+          if (budgetResult.status === "fulfilled") {
+            setMonthlyBudget(budgetResult.value.monthly || 250000);
+            setCategoryBudgets(budgetResult.value.categories);
+          } else {
+            console.warn(
+              "No se pudo cargar el presupuesto:",
+              budgetResult.reason,
+            );
+          }
         } finally {
           setIsHydrated(true);
         }
       };
 
       loadExpenses();
-    }, []),
+    }, [selectedMonth, isReady, user]),
   );
 
   if (!isHydrated || isAuthenticating || !isAuthenticated) {
@@ -145,18 +142,49 @@ export default function HomeScreen() {
     );
   }
 
-  const totalAmount = getTotalExpenses(expenses);
+  const monthlyExpenses = expenses.filter((expense) => {
+    const date = getExpenseDate(expense);
+    return (
+      date !== null &&
+      date.getFullYear() === selectedMonth.getFullYear() &&
+      date.getMonth() === selectedMonth.getMonth()
+    );
+  });
+  const previousMonth = new Date(
+    selectedMonth.getFullYear(),
+    selectedMonth.getMonth() - 1,
+    1,
+  );
+  const now = new Date();
+  const isCurrentMonth =
+    selectedMonth.getFullYear() === now.getFullYear() &&
+    selectedMonth.getMonth() === now.getMonth();
+  const previousMonthExpenses = expenses.filter((expense) => {
+    const date = getExpenseDate(expense);
+    return (
+      date !== null &&
+      date.getFullYear() === previousMonth.getFullYear() &&
+      date.getMonth() === previousMonth.getMonth()
+    );
+  });
+  const totalAmount = getTotalExpenses(monthlyExpenses);
 
   const formattedTotal = `$${totalAmount.toLocaleString("es-AR")}`;
 
-  const growthPercentage = getGrowthPercentage(expenses);
+  const previousMonthTotal = getTotalExpenses(previousMonthExpenses);
+  const growthPercentage =
+    previousMonthTotal > 0
+      ? Math.round(
+          ((totalAmount - previousMonthTotal) / previousMonthTotal) * 100,
+        )
+      : null;
 
   const savings = Math.max(income - totalAmount, 0);
 
   const formattedIncome = `$${income.toLocaleString("es-AR")}`;
   const formattedSavings = `$${savings.toLocaleString("es-AR")}`;
 
-  const categoryTotals = getExpensesByCategory(expenses);
+  const categoryTotals = getExpensesByCategory(monthlyExpenses);
   const monthlyUsage =
     monthlyBudget > 0 ? (totalAmount / monthlyBudget) * 100 : 0;
   const monthlyRemaining = monthlyBudget - totalAmount;
@@ -172,6 +200,7 @@ export default function HomeScreen() {
     "Compras",
     "Entretenimiento",
     "Otros",
+    "Objetivos",
   ];
 
   return (
@@ -201,11 +230,42 @@ export default function HomeScreen() {
         {/* Selector de mes */}
 
         <View style={styles.monthSelector}>
-          <Text style={styles.arrow}>‹</Text>
-
-          <Text style={styles.month}>Septiembre 2026</Text>
-
-          <Text style={styles.arrow}>›</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Ver mes anterior"
+            hitSlop={12}
+            onPress={() =>
+              setSelectedMonth(
+                (month) =>
+                  new Date(month.getFullYear(), month.getMonth() - 1, 1),
+              )
+            }
+          >
+            <Text style={styles.arrow}>‹</Text>
+          </Pressable>
+          <Text style={styles.month}>
+            {selectedMonth
+              .toLocaleDateString("es-AR", { month: "long", year: "numeric" })
+              .replace(/^./, (letter) => letter.toUpperCase())}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Ver mes siguiente"
+            hitSlop={12}
+            disabled={isCurrentMonth}
+            onPress={() =>
+              setSelectedMonth(
+                (month) =>
+                  new Date(month.getFullYear(), month.getMonth() + 1, 1),
+              )
+            }
+          >
+            <Text
+              style={[styles.arrow, isCurrentMonth && styles.disabledArrow]}
+            >
+              ›
+            </Text>
+          </Pressable>
         </View>
 
         {/* Gasto total */}
@@ -216,7 +276,7 @@ export default function HomeScreen() {
           <Text style={styles.totalAmount}>{formattedTotal}</Text>
 
           <View style={styles.totalFooter}>
-            <Text style={styles.totalDescription}>Este mes llevás gastado</Text>
+            <Text style={styles.totalDescription}>Total de gastos del mes</Text>
 
             {growthPercentage !== null && (
               <View style={styles.percentageBadge}>
@@ -300,6 +360,8 @@ export default function HomeScreen() {
               amount: categoryTotals[category] ?? 0,
             }))
             .sort((a, b) => b.amount - a.amount)
+            // Mostrar únicamente las categorías que tienen gastos registrados.
+            .filter(({ amount }) => amount > 0)
             .map(({ name, amount }) => {
               const percentage =
                 totalAmount > 0 ? Math.round((amount / totalAmount) * 100) : 0;
@@ -319,7 +381,16 @@ export default function HomeScreen() {
 
         {/* Mapa de gastos */}
 
-        <Pressable style={styles.mapCard} onPress={() => router.push("/mapa")}>
+        <Pressable
+          style={styles.mapCard}
+          onPress={() => router.push({
+            pathname: "/mapa",
+            params: {
+              year: String(selectedMonth.getFullYear()),
+              month: String(selectedMonth.getMonth() + 1),
+            },
+          })}
+        >
           <View style={styles.mapIconContainer}>
             <SymbolView
               name={{
@@ -347,7 +418,13 @@ export default function HomeScreen() {
 
         <Pressable
           style={styles.mapCard}
-          onPress={() => router.push("/presupuesto")}
+          onPress={() => router.push({
+            pathname: "/presupuesto",
+            params: {
+              year: String(selectedMonth.getFullYear()),
+              month: String(selectedMonth.getMonth() + 1),
+            },
+          })}
         >
           <View style={styles.budgetIconContainer}>
             <Text style={styles.budgetIcon}>$</Text>
@@ -357,7 +434,7 @@ export default function HomeScreen() {
             <Text style={styles.mapTitle}>Presupuesto</Text>
 
             <Text style={styles.mapDescription}>
-              Controlá cuánto podés gastar este mes
+              Revisá el presupuesto del mes seleccionado
             </Text>
           </View>
 
@@ -510,6 +587,10 @@ const styles = StyleSheet.create({
   arrow: {
     fontSize: 25,
     color: "#2563EB",
+  },
+
+  disabledArrow: {
+    color: "#CBD5E1",
   },
 
   totalCard: {

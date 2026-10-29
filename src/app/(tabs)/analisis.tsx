@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useState } from "react";
 import {
@@ -20,20 +19,12 @@ import Svg, {
   Text as SvgText,
 } from "react-native-svg";
 import { Expense } from "../../data/expenses";
+import { getExpenses, getIncome, saveIncome as saveIncomeRequest } from "../../services/api";
 import {
-  getGrowthPercentage,
+  getExpenseDate,
   getMonthlyExpenses,
   getNumericAmount,
 } from "../../utils/expenseUtils";
-
-const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
-const INCOME_STORAGE_KEY = "gestor-gastos-ingresos";
-const INCOME_MONTH_STORAGE_KEY = "gestor-gastos-ingresos-mes";
-
-const getCurrentMonthKey = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-};
 
 const categoryColors: Record<string, string> = {
   Comida: "#F97316",
@@ -41,6 +32,7 @@ const categoryColors: Record<string, string> = {
   Compras: "#A855F7",
   Entretenimiento: "#EC4899",
   Otros: "#10B981",
+  Objetivos: "#06B6D4",
 };
 
 function formatCurrency(amount: number): string {
@@ -237,7 +229,7 @@ function LineChart({
 export default function AnalisisScreen() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
 
-  const [income, setIncome] = useState(350000);
+  const [income, setIncome] = useState(0);
 
   const [incomeModalVisible, setIncomeModalVisible] = useState(false);
 
@@ -250,46 +242,29 @@ export default function AnalisisScreen() {
   useFocusEffect(
     useCallback(() => {
       const loadData = async () => {
-        try {
-          const storedExpenses =
-            await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
-
-          if (storedExpenses) {
-            setExpenses(JSON.parse(storedExpenses));
-          } else {
-            setExpenses([]);
-          }
-
-          const [storedIncome, storedIncomeMonth] = await Promise.all([
-            AsyncStorage.getItem(INCOME_STORAGE_KEY),
-            AsyncStorage.getItem(INCOME_MONTH_STORAGE_KEY),
-          ]);
-
-          if (storedIncome) {
-            setIncome(Number(storedIncome));
-            if (storedIncomeMonth) {
-              setIncomeRegisteredThisMonth(
-                storedIncomeMonth === getCurrentMonthKey(),
-              );
-            } else {
-              // Compatibilidad con ingresos guardados antes de registrar el mes.
-              await AsyncStorage.setItem(
-                INCOME_MONTH_STORAGE_KEY,
-                getCurrentMonthKey(),
-              );
-              setIncomeRegisteredThisMonth(true);
-            }
-          } else {
-            setIncomeRegisteredThisMonth(false);
-          }
-        } catch (error) {}
+        const [expensesResult, incomeResult] = await Promise.allSettled([getExpenses(), getIncome()]);
+        if (expensesResult.status === "fulfilled") setExpenses(expensesResult.value);
+        if (incomeResult.status === "fulfilled") {
+          setIncome(incomeResult.value.amount);
+          setIncomeRegisteredThisMonth(incomeResult.value.registered);
+          setIncomeError("");
+        } else {
+          setIncomeError(incomeResult.reason instanceof Error ? incomeResult.reason.message : "No se pudieron cargar los ingresos.");
+        }
       };
 
       loadData();
     }, []),
   );
 
-  const totalSpent = expenses.reduce((total, expense) => {
+  const now = new Date();
+  const currentMonthLabel = now.toLocaleDateString("es-AR", { month: "long", year: "numeric" }).replace(/^./, (letter) => letter.toUpperCase());
+  const currentMonthExpenses = expenses.filter((expense) => {
+    const date = getExpenseDate(expense);
+    return date !== null && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  });
+
+  const totalSpent = currentMonthExpenses.reduce((total, expense) => {
     return total + getNumericAmount(expense.amount);
   }, 0);
 
@@ -298,7 +273,7 @@ export default function AnalisisScreen() {
   const savingsPercentage =
     income > 0 ? Math.round((savings / income) * 100) : 0;
 
-  const categoryTotals = expenses.reduce(
+  const categoryTotals = currentMonthExpenses.reduce(
     (totals, expense) => {
       const amount = getNumericAmount(expense.amount);
 
@@ -334,28 +309,24 @@ export default function AnalisisScreen() {
    * EVOLUCIÓN MENSUAL
    */
 
-  const monthlyExpenses = getMonthlyExpenses(expenses).slice(-4);
+  const allMonthlyExpenses = getMonthlyExpenses(expenses);
+  const monthlyExpenses = allMonthlyExpenses.slice(-4);
 
   const chartData = monthlyExpenses.map((item) => ({
     month: item.month,
     amount: item.amount,
   }));
 
-  const currentMonth =
-    monthlyExpenses.length > 0
-      ? monthlyExpenses[monthlyExpenses.length - 1]
-      : null;
-
-  const currentMonthAmount = currentMonth?.amount ?? totalSpent;
-
-  const previousMonth =
-    monthlyExpenses.length > 1
-      ? monthlyExpenses[monthlyExpenses.length - 2]
-      : null;
+  const currentMonth = allMonthlyExpenses.find((item) => item.year === now.getFullYear() && item.monthIndex === now.getMonth());
+  const currentMonthAmount = currentMonth?.amount ?? 0;
+  const previousMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousMonth = allMonthlyExpenses.find((item) => item.year === previousMonthDate.getFullYear() && item.monthIndex === previousMonthDate.getMonth());
 
   const previousMonthAmount = previousMonth?.amount ?? 0;
 
-  const growthPercentage = getGrowthPercentage(expenses);
+  const growthPercentage = previousMonthAmount > 0
+    ? Math.round(((currentMonthAmount - previousMonthAmount) / previousMonthAmount) * 100)
+    : null;
 
   const isGrowthPositive = growthPercentage !== null && growthPercentage >= 0;
 
@@ -369,6 +340,10 @@ export default function AnalisisScreen() {
    */
 
   const openIncomeModal = () => {
+    if (incomeError) {
+      Alert.alert("No se pudieron consultar los ingresos", incomeError);
+      return;
+    }
     if (incomeRegisteredThisMonth) {
       Alert.alert(
         "Ingresos ya registrados",
@@ -397,20 +372,13 @@ export default function AnalisisScreen() {
     }
 
     try {
-      await AsyncStorage.setItem(INCOME_STORAGE_KEY, numericIncome.toString());
-      await AsyncStorage.setItem(
-        INCOME_MONTH_STORAGE_KEY,
-        getCurrentMonthKey(),
-      );
-
-      setIncome(numericIncome);
+      const savedIncome = await saveIncomeRequest(numericIncome);
+      setIncome(savedIncome.amount);
       setIncomeRegisteredThisMonth(true);
       setIncomeModalVisible(false);
       setIncomeError("");
     } catch (error) {
-      setIncomeError(
-        "No se pudieron guardar los ingresos. Intentá nuevamente.",
-      );
+      setIncomeError(error instanceof Error ? error.message : "No se pudieron guardar los ingresos. Intentá nuevamente.");
     }
   };
 
@@ -425,7 +393,7 @@ export default function AnalisisScreen() {
         {/* ENCABEZADO */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.smallTitle}>Septiembre 2026</Text>
+            <Text style={styles.smallTitle}>{currentMonthLabel}</Text>
 
             <Text style={styles.title}>Análisis</Text>
           </View>

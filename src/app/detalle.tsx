@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
@@ -10,9 +9,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Expense } from "../data/expenses";
-
-const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
+import type { Expense } from "../data/expenses";
+import { deleteExpense, getExpenses } from "../services/api";
 
 export default function DetalleScreen() {
   const router = useRouter();
@@ -27,15 +25,7 @@ export default function DetalleScreen() {
         try {
           setIsLoading(true);
 
-          const storedExpenses =
-            await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
-
-          if (!storedExpenses) {
-            setExpense(null);
-            return;
-          }
-
-          const storedExpensesList: Expense[] = JSON.parse(storedExpenses);
+          const storedExpensesList = await getExpenses();
 
           const foundExpense = storedExpensesList.find(
             (item) => item.id.toString() === id?.toString(),
@@ -71,23 +61,7 @@ export default function DetalleScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              const storedExpenses =
-                await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
-
-              if (!storedExpenses) {
-                return;
-              }
-
-              const storedExpensesList: Expense[] = JSON.parse(storedExpenses);
-
-              const updatedExpenses = storedExpensesList.filter(
-                (item) => item.id !== expense.id,
-              );
-
-              await AsyncStorage.setItem(
-                EXPENSES_STORAGE_KEY,
-                JSON.stringify(updatedExpenses),
-              );
+              await deleteExpense(expense.id);
 
               router.replace("/gastos");
             } catch (error) {

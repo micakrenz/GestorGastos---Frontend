@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -13,9 +12,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Expense } from "../../data/expenses";
-
-const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
+import { createExpense } from "../../services/api";
 
 const categories = [
   { name: "Comida", color: "#F97316" },
@@ -123,59 +120,18 @@ export default function AgregarScreen() {
     if (!selectedCategory) return;
 
     try {
-      const storedExpenses = await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
-
-      const currentExpenses: Expense[] = storedExpenses
-        ? JSON.parse(storedExpenses)
-        : [];
-
       const now = new Date();
-
-      const hours = now.getHours().toString().padStart(2, "0");
-
-      const minutes = now.getMinutes().toString().padStart(2, "0");
-
-      const months = [
-        "enero",
-        "febrero",
-        "marzo",
-        "abril",
-        "mayo",
-        "junio",
-        "julio",
-        "agosto",
-        "septiembre",
-        "octubre",
-        "noviembre",
-        "diciembre",
-      ];
-
-      const fullDate = `${now.getDate()} de ${
-        months[now.getMonth()]
-      } de ${now.getFullYear()}`;
-
-      const newExpense: Expense = {
-        id: Date.now(),
+      await createExpense({
         category: selectedCategory.name,
         description: description.trim(),
-        time: `${hours}:${minutes}`,
         amount: `$${numericAmount.toLocaleString("es-AR")}`,
-        color: selectedCategory.color,
-        date: "Hoy",
-        fullDate,
+        date: now.toISOString(),
         paymentMethod,
         zone,
         note: note.trim(),
         latitude: location?.latitude,
         longitude: location?.longitude,
-      };
-
-      const updatedExpenses = [newExpense, ...currentExpenses];
-
-      await AsyncStorage.setItem(
-        EXPENSES_STORAGE_KEY,
-        JSON.stringify(updatedExpenses),
-      );
+      });
 
       setDescription("");
       setAmount("");

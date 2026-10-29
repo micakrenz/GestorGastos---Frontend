@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -11,9 +10,8 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Expense, expenses as initialExpenses } from "../data/expenses";
-
-const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
+import type { Expense } from "../data/expenses";
+import { getExpenses, updateExpense } from "../services/api";
 
 const categories = [
   {
@@ -66,11 +64,7 @@ export default function EditarScreen() {
   useEffect(() => {
     const loadExpense = async () => {
       try {
-        const storedExpenses = await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
-
-        const expensesList: Expense[] = storedExpenses
-          ? JSON.parse(storedExpenses)
-          : initialExpenses;
+        const expensesList = await getExpenses();
 
         const expense = expensesList.find(
           (item) => item.id.toString() === id?.toString(),
@@ -123,33 +117,14 @@ export default function EditarScreen() {
     }
 
     try {
-      const storedExpenses = await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
-
-      const expensesList: Expense[] = storedExpenses
-        ? JSON.parse(storedExpenses)
-        : initialExpenses;
-
-      const updatedExpenses = expensesList.map((item) => {
-        if (item.id !== Number(id)) {
-          return item;
-        }
-
-        return {
-          ...item,
-          description: description.trim(),
-          amount: `$${numericAmount.toLocaleString("es-AR")}`,
-          category: selectedCategory.name,
-          color: selectedCategory.color,
-          paymentMethod,
-          zone,
-          note: note.trim(),
-        };
+      await updateExpense(Number(id), {
+        description: description.trim(),
+        amount: `$${numericAmount.toLocaleString("es-AR")}`,
+        category: selectedCategory.name,
+        paymentMethod,
+        zone,
+        note: note.trim(),
       });
-
-      await AsyncStorage.setItem(
-        EXPENSES_STORAGE_KEY,
-        JSON.stringify(updatedExpenses),
-      );
 
       Alert.alert(
         "Gasto actualizado",

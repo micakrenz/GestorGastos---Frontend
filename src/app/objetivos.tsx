@@ -1,4 +1,3 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -12,41 +11,12 @@ import {
     View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-type Goal = {
-  id: number;
-  title: string;
-  current: number;
-  target: number;
-};
-
-const initialGoals: Goal[] = [
-  {
-    id: 1,
-    title: "Viaje a Brasil",
-    current: 350000,
-    target: 500000,
-  },
-  {
-    id: 2,
-    title: "Nueva notebook",
-    current: 420000,
-    target: 800000,
-  },
-];
-
-const GOALS_STORAGE_KEY = "gestor-gastos-objetivos";
-const GOAL_MOVEMENTS_STORAGE_KEY = "gestor-gastos-movimientos-objetivos";
-
-const getCurrentMonthKey = () => {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-};
+import { createGoal, createGoalMovement, deleteGoal, getGoals, Goal, updateGoal } from "../services/api";
 
 export default function ObjetivosScreen() {
   const router = useRouter();
 
-  const [goals, setGoals] = useState<Goal[]>(initialGoals);
+  const [goals, setGoals] = useState<Goal[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
 
   // Sumar / restar ahorro
@@ -68,11 +38,7 @@ export default function ObjetivosScreen() {
   useEffect(() => {
     const loadGoals = async () => {
       try {
-        const storedGoals = await AsyncStorage.getItem(GOALS_STORAGE_KEY);
-
-        if (storedGoals) {
-          setGoals(JSON.parse(storedGoals));
-        }
+        setGoals(await getGoals());
       } catch (error) {
         setGoals([]);
       } finally {
@@ -82,20 +48,6 @@ export default function ObjetivosScreen() {
 
     loadGoals();
   }, []);
-
-  useEffect(() => {
-    if (!isHydrated) {
-      return;
-    }
-
-    const saveGoals = async () => {
-      try {
-        await AsyncStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(goals));
-      } catch (error) {}
-    };
-
-    saveGoals();
-  }, [goals, isHydrated]);
 
   // --------------------------------------------------
   // SUMAR / RESTAR AHORRO
@@ -145,15 +97,9 @@ export default function ObjetivosScreen() {
     }
 
     try {
-      const storedMovements = await AsyncStorage.getItem(GOAL_MOVEMENTS_STORAGE_KEY);
-      const movements: Record<string, number> = storedMovements ? JSON.parse(storedMovements) : {};
-      const monthKey = getCurrentMonthKey();
-      const signedAmount = operation === "add" ? numericAmount : -numericAmount;
-      movements[monthKey] = (Number(movements[monthKey]) || 0) + signedAmount;
-      await AsyncStorage.setItem(GOAL_MOVEMENTS_STORAGE_KEY, JSON.stringify(movements));
-
+      const result = await createGoalMovement(selectedGoal.id, numericAmount, operation === "add" ? "ADD" : "SUBTRACT");
       setGoals((currentGoals) => currentGoals.map((goal) =>
-        goal.id === selectedGoal.id ? { ...goal, current: newCurrent } : goal,
+        goal.id === selectedGoal.id ? { ...goal, current: result.current, movements: [...goal.movements, result.movement] } : goal,
       ));
       setSelectedGoal(null);
       setAmount("");
@@ -172,7 +118,7 @@ export default function ObjetivosScreen() {
     setEditTarget(goal.target.toString());
   };
 
-  const handleEditGoal = () => {
+  const handleEditGoal = async () => {
     const numericTarget = Number(editTarget);
 
     if (!editTitle.trim()) {
@@ -185,20 +131,14 @@ export default function ObjetivosScreen() {
       return;
     }
 
-    setGoals((currentGoals) =>
-      currentGoals.map((goal) => {
-        if (goal.id !== editingGoal?.id) {
-          return goal;
-        }
-
-        return {
-          ...goal,
-          title: editTitle.trim(),
-          target: numericTarget,
-          current: Math.min(goal.current, numericTarget),
-        };
-      }),
-    );
+    if (!editingGoal) return;
+    try {
+      const saved = await updateGoal(editingGoal.id, { title: editTitle.trim(), target: numericTarget });
+      setGoals((currentGoals) => currentGoals.map((goal) => goal.id === saved.id ? saved : goal));
+    } catch (error) {
+      Alert.alert("Error", error instanceof Error ? error.message : "No se pudo actualizar el objetivo.");
+      return;
+    }
 
     setEditingGoal(null);
     setEditTitle("");
@@ -209,7 +149,7 @@ export default function ObjetivosScreen() {
   // CREAR OBJETIVO
   // --------------------------------------------------
 
-  const handleCreateGoal = () => {
+  const handleCreateGoal = async () => {
     const numericTarget = Number(newTarget);
     const numericCurrent = Number(newCurrent);
 
@@ -236,14 +176,13 @@ export default function ObjetivosScreen() {
       return;
     }
 
-    const newGoal: Goal = {
-      id: Date.now(),
-      title: newTitle.trim(),
-      current: numericCurrent,
-      target: numericTarget,
-    };
-
-    setGoals((currentGoals) => [...currentGoals, newGoal]);
+    try {
+      const newGoal = await createGoal(newTitle.trim(), numericTarget, numericCurrent);
+      setGoals((currentGoals) => [...currentGoals, newGoal]);
+    } catch (error) {
+      Alert.alert("Error", error instanceof Error ? error.message : "No se pudo crear el objetivo.");
+      return;
+    }
 
     setIsCreating(false);
     setNewTitle("");
@@ -267,10 +206,13 @@ export default function ObjetivosScreen() {
         {
           text: "Eliminar",
           style: "destructive",
-          onPress: () => {
-            setGoals((currentGoals) =>
-              currentGoals.filter((currentGoal) => currentGoal.id !== goal.id),
-            );
+          onPress: async () => {
+            try {
+              await deleteGoal(goal.id);
+              setGoals((currentGoals) => currentGoals.filter((currentGoal) => currentGoal.id !== goal.id));
+            } catch (error) {
+              Alert.alert("Error", error instanceof Error ? error.message : "No se pudo eliminar el objetivo.");
+            }
           },
         },
       ],

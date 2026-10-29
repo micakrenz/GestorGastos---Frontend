@@ -1,12 +1,12 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Circle, Marker } from "react-native-maps";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Expense } from "../data/expenses";
+import { getExpenses } from "../services/api";
+import { getExpenseDate } from "../utils/expenseUtils";
 
-const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
 
 type Frequency = "Baja" | "Media" | "Alta";
 
@@ -95,6 +95,14 @@ function getFrequencyColor(level: Frequency) {
 
 export default function MapaScreen() {
   const router = useRouter();
+  const { year: yearParam, month: monthParam } = useLocalSearchParams<{ year?: string; month?: string }>();
+  const now = new Date();
+  const parsedYear = Number(yearParam);
+  const parsedMonth = Number(monthParam);
+  const selectedYear = Number.isInteger(parsedYear) && parsedYear >= 2000 && parsedYear <= 2200 ? parsedYear : now.getFullYear();
+  const selectedMonth = Number.isInteger(parsedMonth) && parsedMonth >= 1 && parsedMonth <= 12 ? parsedMonth : now.getMonth() + 1;
+  const selectedPeriod = new Date(selectedYear, selectedMonth - 1, 1);
+  const selectedMonthLabel = selectedPeriod.toLocaleDateString("es-AR", { month: "long", year: "numeric" }).replace(/^./, (letter) => letter.toUpperCase());
 
   const [selectedFilter, setSelectedFilter] = useState<"Todos" | Frequency>(
     "Todos",
@@ -108,12 +116,11 @@ export default function MapaScreen() {
     useCallback(() => {
       const loadExpenses = async () => {
         try {
-          const storedExpenses =
-            await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
-
-          const expenses: Expense[] = storedExpenses
-            ? JSON.parse(storedExpenses)
-            : [];
+          const allExpenses: Expense[] = await getExpenses();
+          const expenses = allExpenses.filter((expense) => {
+            const date = getExpenseDate(expense);
+            return date !== null && date.getFullYear() === selectedYear && date.getMonth() + 1 === selectedMonth;
+          });
           const getAmount = (value: string) =>
             Number(value.replace(/[^0-9]/g, "")) || 0;
           const totalSpent = expenses.reduce(
@@ -188,7 +195,7 @@ export default function MapaScreen() {
       };
 
       loadExpenses();
-    }, []),
+    }, [selectedYear, selectedMonth]),
   );
 
   const filteredZones =
@@ -207,7 +214,7 @@ export default function MapaScreen() {
 
         <View style={styles.headerText}>
           <Text style={styles.title}>Mapa de gastos</Text>
-          <Text style={styles.subtitle}>Distribución del gasto por zona</Text>
+          <Text style={styles.subtitle}>{selectedMonthLabel} · gasto por zona</Text>
         </View>
       </View>
 
@@ -310,6 +317,9 @@ export default function MapaScreen() {
                         color: zone.color,
                       },
                     ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
                   >
                     {zone.percentage}%
                   </Text>
@@ -508,7 +518,7 @@ const styles = StyleSheet.create({
   },
 
   marker: {
-    width: 48,
+    width: 64,
     height: 48,
     borderRadius: 24,
     backgroundColor: "#FFFFFF",
@@ -526,7 +536,7 @@ const styles = StyleSheet.create({
   },
 
   markerText: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "700",
   },
 

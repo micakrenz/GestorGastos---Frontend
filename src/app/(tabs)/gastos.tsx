@@ -1,16 +1,14 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Expense, expenses as initialExpenses } from "../../data/expenses";
-
-const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
+import { getExpenses } from "../../services/api";
+import type { Expense } from "../../data/expenses";
 
 export default function GastosScreen() {
   const router = useRouter();
 
-  const [expenses, setExpenses] = useState<Expense[]>(initialExpenses);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
 
   const [filter, setFilter] = useState("Todos");
 
@@ -21,13 +19,10 @@ export default function GastosScreen() {
     useCallback(() => {
       const loadExpenses = async () => {
         try {
-          const storedExpenses =
-            await AsyncStorage.getItem(EXPENSES_STORAGE_KEY);
-
-          if (storedExpenses) {
-            setExpenses(JSON.parse(storedExpenses));
-          }
-        } catch {
+          setExpenses(await getExpenses());
+        } catch (error) {
+          setExpenses([]);
+          if (error instanceof Error) console.warn("No se pudieron cargar los gastos:", error.message);
         } finally {
           setIsHydrated(true);
         }
@@ -76,7 +71,7 @@ export default function GastosScreen() {
         {/* Encabezado */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.smallTitle}>Septiembre 2026</Text>
+            <Text style={styles.smallTitle}>{new Intl.DateTimeFormat("es-AR", { month: "long", year: "numeric" }).format(new Date())}</Text>
 
             <Text style={styles.title}>Mis gastos</Text>
           </View>

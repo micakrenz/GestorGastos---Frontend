@@ -1,5 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useState } from "react";
 import {
   Alert,
@@ -13,11 +12,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Expense } from "../data/expenses";
-
-const EXPENSES_STORAGE_KEY = "gestor-gastos-gastos";
-const BUDGET_STORAGE_KEY = "gestor-gastos-presupuesto";
-const INCOME_STORAGE_KEY = "gestor-gastos-ingresos";
-const GOAL_MOVEMENTS_STORAGE_KEY = "gestor-gastos-movimientos-objetivos";
+import { getBudget, getCurrentMonthGoalNet, getExpenses, getIncome, saveBudget as saveBudgetRequest } from "../services/api";
+import { getExpenseDate } from "../utils/expenseUtils";
 
 const categories = [
   {
@@ -51,6 +47,14 @@ type ModalType = "monthly" | "category" | "create" | null;
 
 export default function PresupuestoScreen() {
   const router = useRouter();
+  const { year: yearParam, month: monthParam } = useLocalSearchParams<{ year?: string; month?: string }>();
+  const now = new Date();
+  const parsedYear = Number(yearParam);
+  const parsedMonth = Number(monthParam);
+  const selectedYear = Number.isInteger(parsedYear) && parsedYear >= 2000 && parsedYear <= 2200 ? parsedYear : now.getFullYear();
+  const selectedMonth = Number.isInteger(parsedMonth) && parsedMonth >= 1 && parsedMonth <= 12 ? parsedMonth : now.getMonth() + 1;
+  const selectedPeriod = new Date(selectedYear, selectedMonth - 1, 1);
+  const selectedMonthLabel = selectedPeriod.toLocaleDateString("es-AR", { month: "long", year: "numeric" }).replace(/^./, (letter) => letter.toUpperCase());
 
   const [budget, setBudget] = useState<Budget>({
     monthly: 250000,
@@ -64,9 +68,7 @@ export default function PresupuestoScreen() {
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [income, setIncome] = useState(0);
-  const [goalMovements, setGoalMovements] = useState<Record<string, number>>(
-    {},
-  );
+  const [goalContributionThisMonth, setGoalContributionThisMonth] = useState(0);
 
   const [modalType, setModalType] = useState<ModalType>(null);
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -79,29 +81,17 @@ export default function PresupuestoScreen() {
         try {
           setIsLoading(true);
 
-          const [
-            storedBudget,
-            storedExpenses,
-            storedIncome,
-            storedGoalMovements,
-          ] = await Promise.all([
-            AsyncStorage.getItem(BUDGET_STORAGE_KEY),
-            AsyncStorage.getItem(EXPENSES_STORAGE_KEY),
-            AsyncStorage.getItem(INCOME_STORAGE_KEY),
-            AsyncStorage.getItem(GOAL_MOVEMENTS_STORAGE_KEY),
+          const [savedBudget, allExpenses, savedIncome, goalNet] = await Promise.all([
+            getBudget(selectedYear, selectedMonth), getExpenses(), getIncome(selectedYear, selectedMonth), getCurrentMonthGoalNet(selectedYear, selectedMonth),
           ]);
-
-          if (storedBudget) {
-            setBudget(JSON.parse(storedBudget));
-          }
-
-          if (storedExpenses) {
-            setExpenses(JSON.parse(storedExpenses));
-          }
-          setIncome(storedIncome ? Number(storedIncome) : 0);
-          setGoalMovements(
-            storedGoalMovements ? JSON.parse(storedGoalMovements) : {},
-          );
+          const savedExpenses = allExpenses.filter((expense) => {
+            const date = getExpenseDate(expense);
+            return date !== null && date.getFullYear() === selectedYear && date.getMonth() + 1 === selectedMonth;
+          });
+          setBudget(savedBudget);
+          setExpenses(savedExpenses);
+          setIncome(savedIncome.amount);
+          setGoalContributionThisMonth(goalNet);
         } catch (error) {
         } finally {
           setIsLoading(false);
@@ -109,17 +99,12 @@ export default function PresupuestoScreen() {
       };
 
       loadData();
-    }, []),
+    }, [selectedYear, selectedMonth]),
   );
 
   const saveBudget = async (updatedBudget: Budget) => {
     try {
-      await AsyncStorage.setItem(
-        BUDGET_STORAGE_KEY,
-        JSON.stringify(updatedBudget),
-      );
-
-      setBudget(updatedBudget);
+      setBudget(await saveBudgetRequest(updatedBudget, selectedYear, selectedMonth));
     } catch (error) {
       Alert.alert("Error", "No se pudo guardar el presupuesto.");
     }
@@ -144,13 +129,11 @@ export default function PresupuestoScreen() {
     0,
   );
 
-  const monthKey = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
-  const goalContributionThisMonth = Number(goalMovements[monthKey]) || 0;
-  const monthlyBalance =
-    budget.monthly - totalSpent - goalContributionThisMonth;
+  // Los aportes a objetivos ya llegan como gastos de categoría "Objetivos".
+  const monthlyBalance = budget.monthly - totalSpent;
   const monthlyAvailable = Math.max(monthlyBalance, 0);
 
-  const monthlyUsed = totalSpent + goalContributionThisMonth;
+  const monthlyUsed = totalSpent;
   const monthlyPercentage =
     budget.monthly > 0
       ? Math.round((monthlyUsed / budget.monthly) * 100)
@@ -306,7 +289,7 @@ export default function PresupuestoScreen() {
           </Pressable>
 
           <View>
-            <Text style={styles.smallTitle}>Septiembre 2026</Text>
+            <Text style={styles.smallTitle}>{selectedMonthLabel}</Text>
             <Text style={styles.title}>Presupuesto</Text>
           </View>
         </View>
@@ -383,7 +366,7 @@ export default function PresupuestoScreen() {
           </Text>
           <Text style={styles.projectedSavingsDescription}>
             {income > 0
-              ? `Ingresos ${formatCurrency(income)} menos ${formatCurrency(plannedSpending)} asignados a gastos y ${formatCurrency(goalContributionThisMonth)} netos destinados a objetivos este mes. ${allocatedCategoryBudget > 0 ? "Al cambiar un límite por categoría, este cálculo se actualiza." : "Configurá límites por categoría para afinar la proyección."}`
+              ? `Ingresos ${formatCurrency(income)} menos ${formatCurrency(plannedSpending)} asignados a gastos y ${formatCurrency(goalContributionThisMonth)} netos destinados a objetivos en ${selectedMonthLabel}. ${allocatedCategoryBudget > 0 ? "Al cambiar un límite por categoría, este cálculo se actualiza." : "Configurá límites por categoría para afinar la proyección."}`
               : "Ingresá tus ingresos mensuales en Análisis para calcular el ahorro proyectado. Las asignaciones se actualizarán automáticamente."}
           </Text>
         </View>
@@ -402,7 +385,7 @@ export default function PresupuestoScreen() {
 
               <Text style={styles.alertDescription}>
                 {monthlyPercentage > 100
-                  ? `Te excediste por ${formatCurrency(Math.abs(Math.min(monthlyBalance, 0)))} considerando gastos y movimientos netos de objetivos. Podés seguir registrando gastos, pero revisá tus asignaciones.`
+                  ? `Te excediste por ${formatCurrency(Math.abs(Math.min(monthlyBalance, 0)))} considerando los gastos registrados, incluidos los aportes a objetivos. Podés seguir registrando gastos, pero revisá tus asignaciones.`
                   : `Ya utilizaste el ${monthlyPercentage}% de tu presupuesto. Te quedan ${formatCurrency(monthlyAvailable)} disponibles.`}
               </Text>
             </View>
