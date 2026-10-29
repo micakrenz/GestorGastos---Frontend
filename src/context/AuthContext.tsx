@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ApiError, getProfile, login as loginRequest, logout as clearSession, register as registerRequest, restoreSessionToken, updateProfile as updateProfileRequest, type User } from "../services/api";
+import { ApiError, completeOnboarding as completeOnboardingRequest, getProfile, login as loginRequest, logout as clearSession, register as registerRequest, restoreSessionToken, updateProfile as updateProfileRequest, type User } from "../services/api";
 
 type AuthContextValue = {
   user: User | null;
@@ -8,6 +8,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   updateProfile: (name: string) => Promise<void>;
+  completeOnboarding: () => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -59,12 +60,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     finally { setIsLoading(false); }
   };
 
+  const completeOnboarding = async () => {
+    await completeOnboardingRequest();
+    setUser((current) => current ? { ...current, onboardingCompleted: true } : current);
+  };
+
   const logout = async () => {
     await clearSession();
     setUser(null);
   };
 
-  const value = useMemo(() => ({ user, isReady, isLoading, login, register, updateProfile, logout }), [user, isReady, isLoading]);
+  const value = useMemo(() => ({ user, isReady, isLoading, login, register, updateProfile, completeOnboarding, logout }), [user, isReady, isLoading]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

@@ -2,7 +2,7 @@ import * as SecureStore from "expo-secure-store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { Expense } from "../data/expenses";
 
-export type User = { id: number; name: string; email: string };
+export type User = { id: number; name: string; email: string; onboardingCompleted: boolean };
 export type GoalMovement = { id: number; amount: number; type: "ADD" | "SUBTRACT"; date: string; note: string };
 export type Goal = { id: number; title: string; target: number; current: number; movements: GoalMovement[] };
 export type Budget = { monthly: number; categories: Record<string, number> };
@@ -59,8 +59,15 @@ async function authenticate(path: "/api/auth/register" | "/api/auth/login", body
   return response.user;
 }
 
-export const register = (name: string, email: string, password: string) =>
-  authenticate("/api/auth/register", { name, email, password });
+export async function register(name: string, email: string, password: string) {
+  const user = await authenticate("/api/auth/register", { name, email, password });
+  // Los valores de la versión anterior vivían en el dispositivo y no pertenecen a una cuenta concreta.
+  await Promise.all([
+    AsyncStorage.removeItem(LEGACY_INCOME_KEY).catch(() => undefined),
+    AsyncStorage.removeItem(LEGACY_INCOME_MONTH_KEY).catch(() => undefined),
+  ]);
+  return user;
+}
 
 export const login = (email: string, password: string) =>
   authenticate("/api/auth/login", { email, password });
@@ -71,6 +78,10 @@ export async function getProfile() {
 
 export async function updateProfile(name: string) {
   return request<User>("/api/profile", { method: "PATCH", body: JSON.stringify({ name }) });
+}
+
+export async function completeOnboarding() {
+  return request<{ onboardingCompleted: true }>("/api/onboarding/complete", { method: "POST" });
 }
 
 export async function logout() {

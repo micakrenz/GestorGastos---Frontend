@@ -3,6 +3,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { SymbolView } from "expo-symbols";
 import { useCallback, useEffect, useState } from "react";
 import {
+  Alert,
   Image,
   Pressable,
   ScrollView,
@@ -13,7 +14,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../context/AuthContext";
 import { Expense } from "../../data/expenses";
-import { getBudget, getExpenses, getIncome } from "../../services/api";
+import { getBudget, getExpenses, getGoals, getIncome } from "../../services/api";
 import {
   getExpenseDate,
   getExpensesByCategory,
@@ -31,10 +32,14 @@ const categoryColors: Record<string, string> = {
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { user, isReady } = useAuth();
+  const { user, isReady, completeOnboarding } = useAuth();
 
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [income, setIncome] = useState(0);
+  const [incomeRegistered, setIncomeRegistered] = useState(false);
+  const [budgetRegistered, setBudgetRegistered] = useState(false);
+  const [hasGoals, setHasGoals] = useState(false);
+  const [isClosingGuide, setIsClosingGuide] = useState(false);
   const [monthlyBudget, setMonthlyBudget] = useState(250000);
   const [categoryBudgets, setCategoryBudgets] = useState<
     Record<string, number>
@@ -81,7 +86,7 @@ export default function HomeScreen() {
 
       const loadExpenses = async () => {
         try {
-          const [expensesResult, incomeResult, budgetResult] =
+          const [expensesResult, incomeResult, budgetResult, goalsResult] =
             await Promise.allSettled([
               getExpenses(),
               getIncome(
@@ -92,6 +97,7 @@ export default function HomeScreen() {
                 selectedMonth.getFullYear(),
                 selectedMonth.getMonth() + 1,
               ),
+              getGoals(),
             ]);
 
           if (expensesResult.status === "fulfilled") {
@@ -105,6 +111,7 @@ export default function HomeScreen() {
 
           if (incomeResult.status === "fulfilled") {
             setIncome(incomeResult.value.amount);
+            setIncomeRegistered(incomeResult.value.registered);
           } else {
             console.warn(
               "No se pudieron cargar los ingresos:",
@@ -115,11 +122,21 @@ export default function HomeScreen() {
           if (budgetResult.status === "fulfilled") {
             setMonthlyBudget(budgetResult.value.monthly || 250000);
             setCategoryBudgets(budgetResult.value.categories);
+            setBudgetRegistered(
+              budgetResult.value.monthly > 0 ||
+                Object.values(budgetResult.value.categories).some((amount) => amount > 0),
+            );
           } else {
             console.warn(
               "No se pudo cargar el presupuesto:",
               budgetResult.reason,
             );
+          }
+
+          if (goalsResult.status === "fulfilled") {
+            setHasGoals(goalsResult.value.length > 0);
+          } else {
+            console.warn("No se pudieron cargar los objetivos:", goalsResult.reason);
           }
         } finally {
           setIsHydrated(true);
@@ -168,6 +185,23 @@ export default function HomeScreen() {
     );
   });
   const totalAmount = getTotalExpenses(monthlyExpenses);
+  const onboardingSteps = [
+    { title: "Ingresá tus ingresos", description: "En Análisis, cargá lo que recibiste este mes.", done: incomeRegistered, onPress: () => router.push("/(tabs)/analisis") },
+    { title: "Registrá un gasto", description: "Anotá una compra o gasto para empezar a ver tus movimientos.", done: monthlyExpenses.length > 0, onPress: () => router.push("/(tabs)/agregar") },
+    { title: "Armá tu presupuesto", description: "Definí cuánto querés gastar este mes.", done: budgetRegistered, onPress: () => router.push({ pathname: "/presupuesto", params: { year: String(selectedMonth.getFullYear()), month: String(selectedMonth.getMonth() + 1) } }) },
+    { title: "Creá un objetivo", description: "Elegí algo para lo que quieras ahorrar.", done: hasGoals, onPress: () => router.push("/objetivos") },
+  ];
+
+  const closeOnboardingGuide = async () => {
+    setIsClosingGuide(true);
+    try {
+      await completeOnboarding();
+    } catch (error) {
+      Alert.alert("No se pudo cerrar la guía", error instanceof Error ? error.message : "Intentá nuevamente.");
+    } finally {
+      setIsClosingGuide(false);
+    }
+  };
 
   const formattedTotal = `$${totalAmount.toLocaleString("es-AR")}`;
 
@@ -226,6 +260,43 @@ export default function HomeScreen() {
             <Text style={styles.title}>Tus gastos</Text>
           </View>
         </View>
+
+        {!user?.onboardingCompleted && (
+          <View style={styles.onboardingCard}>
+            <Text style={styles.onboardingTitle}>¡Empezá a organizar tus gastos!</Text>
+            <Text style={styles.onboardingIntro}>
+              Estos pasos te ayudan a dejar tu cuenta lista. Tocá uno para ir a esa sección.
+            </Text>
+            <Text style={styles.onboardingProgress}>
+              {onboardingSteps.filter((step) => step.done).length} de {onboardingSteps.length} pasos completados
+            </Text>
+            {onboardingSteps.map((step) => (
+              <Pressable key={step.title} style={styles.onboardingStep} onPress={step.onPress}>
+                <View style={[styles.onboardingCheck, step.done && styles.onboardingCheckDone]}>
+                  <Text style={[styles.onboardingCheckText, step.done && styles.onboardingCheckTextDone]}>
+                    {step.done ? "✓" : ""}
+                  </Text>
+                </View>
+                <View style={styles.onboardingStepCopy}>
+                  <Text style={[styles.onboardingStepTitle, step.done && styles.onboardingStepTitleDone]}>
+                    {step.title}
+                  </Text>
+                  <Text style={styles.onboardingStepDescription}>{step.description}</Text>
+                </View>
+                <Text style={styles.onboardingArrow}>›</Text>
+              </Pressable>
+            ))}
+            <Pressable
+              style={[styles.onboardingClose, isClosingGuide && styles.onboardingCloseDisabled]}
+              onPress={closeOnboardingGuide}
+              disabled={isClosingGuide}
+            >
+              <Text style={styles.onboardingCloseText}>
+                {isClosingGuide ? "Guardando..." : "Cerrar guía"}
+              </Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Selector de mes */}
 
@@ -544,6 +615,116 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 0,
     marginBottom: 20,
+  },
+
+  onboardingCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+  },
+
+  onboardingTitle: {
+    color: "#0D1B2A",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  onboardingIntro: {
+    color: "#64748B",
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 6,
+  },
+
+  onboardingProgress: {
+    color: "#2563EB",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 14,
+    marginBottom: 4,
+  },
+
+  onboardingStep: {
+    minHeight: 66,
+    flexDirection: "row",
+    alignItems: "center",
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    paddingVertical: 9,
+    gap: 11,
+  },
+
+  onboardingCheck: {
+    width: 23,
+    height: 23,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: "#CBD5E1",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  onboardingCheckDone: {
+    backgroundColor: "#DBEAFE",
+    borderColor: "#2563EB",
+  },
+
+  onboardingCheckText: {
+    color: "transparent",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+
+  onboardingCheckTextDone: {
+    color: "#2563EB",
+  },
+
+  onboardingStepCopy: {
+    flex: 1,
+  },
+
+  onboardingStepTitle: {
+    color: "#0D1B2A",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  onboardingStepTitleDone: {
+    color: "#64748B",
+  },
+
+  onboardingStepDescription: {
+    color: "#64748B",
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 2,
+  },
+
+  onboardingArrow: {
+    color: "#94A3B8",
+    fontSize: 23,
+  },
+
+  onboardingClose: {
+    alignItems: "center",
+    justifyContent: "center",
+    minHeight: 42,
+    borderRadius: 12,
+    backgroundColor: "#EFF6FF",
+    marginTop: 13,
+  },
+
+  onboardingCloseDisabled: {
+    opacity: 0.6,
+  },
+
+  onboardingCloseText: {
+    color: "#2563EB",
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   title: {
