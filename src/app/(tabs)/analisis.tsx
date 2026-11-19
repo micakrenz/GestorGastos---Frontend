@@ -19,7 +19,11 @@ import Svg, {
   Text as SvgText,
 } from "react-native-svg";
 import { Expense } from "../../data/expenses";
-import { getExpenses, getIncome, saveIncome as saveIncomeRequest } from "../../services/api";
+import {
+  getExpenses,
+  getIncome,
+  saveIncome as saveIncomeRequest,
+} from "../../services/api";
 import {
   getExpenseDate,
   getMonthlyExpenses,
@@ -238,18 +242,31 @@ export default function AnalisisScreen() {
   const [incomeError, setIncomeError] = useState("");
   const [incomeRegisteredThisMonth, setIncomeRegisteredThisMonth] =
     useState(false);
+  const [inheritedFrom, setInheritedFrom] = useState<{
+    year: number;
+    month: number;
+  } | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       const loadData = async () => {
-        const [expensesResult, incomeResult] = await Promise.allSettled([getExpenses(), getIncome()]);
-        if (expensesResult.status === "fulfilled") setExpenses(expensesResult.value);
+        const [expensesResult, incomeResult] = await Promise.allSettled([
+          getExpenses(),
+          getIncome(),
+        ]);
+        if (expensesResult.status === "fulfilled")
+          setExpenses(expensesResult.value);
         if (incomeResult.status === "fulfilled") {
           setIncome(incomeResult.value.amount);
           setIncomeRegisteredThisMonth(incomeResult.value.registered);
+          setInheritedFrom(incomeResult.value.inheritedFrom);
           setIncomeError("");
         } else {
-          setIncomeError(incomeResult.reason instanceof Error ? incomeResult.reason.message : "No se pudieron cargar los ingresos.");
+          setIncomeError(
+            incomeResult.reason instanceof Error
+              ? incomeResult.reason.message
+              : "No se pudieron cargar los ingresos.",
+          );
         }
       };
 
@@ -258,10 +275,16 @@ export default function AnalisisScreen() {
   );
 
   const now = new Date();
-  const currentMonthLabel = now.toLocaleDateString("es-AR", { month: "long", year: "numeric" }).replace(/^./, (letter) => letter.toUpperCase());
+  const currentMonthLabel = now
+    .toLocaleDateString("es-AR", { month: "long", year: "numeric" })
+    .replace(/^./, (letter) => letter.toUpperCase());
   const currentMonthExpenses = expenses.filter((expense) => {
     const date = getExpenseDate(expense);
-    return date !== null && date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+    return (
+      date !== null &&
+      date.getFullYear() === now.getFullYear() &&
+      date.getMonth() === now.getMonth()
+    );
   });
 
   const totalSpent = currentMonthExpenses.reduce((total, expense) => {
@@ -317,16 +340,27 @@ export default function AnalisisScreen() {
     amount: item.amount,
   }));
 
-  const currentMonth = allMonthlyExpenses.find((item) => item.year === now.getFullYear() && item.monthIndex === now.getMonth());
+  const currentMonth = allMonthlyExpenses.find(
+    (item) =>
+      item.year === now.getFullYear() && item.monthIndex === now.getMonth(),
+  );
   const currentMonthAmount = currentMonth?.amount ?? 0;
   const previousMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const previousMonth = allMonthlyExpenses.find((item) => item.year === previousMonthDate.getFullYear() && item.monthIndex === previousMonthDate.getMonth());
+  const previousMonth = allMonthlyExpenses.find(
+    (item) =>
+      item.year === previousMonthDate.getFullYear() &&
+      item.monthIndex === previousMonthDate.getMonth(),
+  );
 
   const previousMonthAmount = previousMonth?.amount ?? 0;
 
-  const growthPercentage = previousMonthAmount > 0
-    ? Math.round(((currentMonthAmount - previousMonthAmount) / previousMonthAmount) * 100)
-    : null;
+  const growthPercentage =
+    previousMonthAmount > 0
+      ? Math.round(
+          ((currentMonthAmount - previousMonthAmount) / previousMonthAmount) *
+            100,
+        )
+      : null;
 
   const isGrowthPositive = growthPercentage !== null && growthPercentage >= 0;
 
@@ -344,14 +378,7 @@ export default function AnalisisScreen() {
       Alert.alert("No se pudieron consultar los ingresos", incomeError);
       return;
     }
-    if (incomeRegisteredThisMonth) {
-      Alert.alert(
-        "Ingresos ya registrados",
-        "Podés registrar tus ingresos una sola vez por mes. Vas a poder ingresarlos nuevamente el mes que viene.",
-      );
-      return;
-    }
-    setIncomeInput("");
+    setIncomeInput(income > 0 ? String(income) : "");
     setIncomeError("");
     setIncomeModalVisible(true);
   };
@@ -364,21 +391,19 @@ export default function AnalisisScreen() {
       return;
     }
 
-    if (incomeRegisteredThisMonth) {
-      setIncomeError(
-        "Ya registraste tus ingresos este mes. Podés volver a hacerlo el mes que viene.",
-      );
-      return;
-    }
-
     try {
       const savedIncome = await saveIncomeRequest(numericIncome);
       setIncome(savedIncome.amount);
       setIncomeRegisteredThisMonth(true);
+      setInheritedFrom(null);
       setIncomeModalVisible(false);
       setIncomeError("");
     } catch (error) {
-      setIncomeError(error instanceof Error ? error.message : "No se pudieron guardar los ingresos. Intentá nuevamente.");
+      setIncomeError(
+        error instanceof Error
+          ? error.message
+          : "No se pudieron guardar los ingresos. Intentá nuevamente.",
+      );
     }
   };
 
@@ -442,32 +467,30 @@ export default function AnalisisScreen() {
           <View style={styles.incomeActionCopy}>
             <Text style={styles.incomeActionTitle}>
               {incomeRegisteredThisMonth
-                ? "Ingresos registrados"
-                : "¿Todavía no registraste tus ingresos?"}
+                ? "Ingresos de este mes"
+                : inheritedFrom
+                  ? "Usando el último ingreso registrado"
+                  : "¿Todavía no registraste tus ingresos?"}
             </Text>
             <Text style={styles.incomeHelperText}>
               {incomeRegisteredThisMonth
-                ? "Podrás registrarlos nuevamente el próximo mes."
-                : "Registralos una vez al mes para calcular tu ahorro."}
+                ? "Podés modificar el importe si cambió."
+                : inheritedFrom
+                  ? "Se mantiene este importe. Cambialo solo si este mes es distinto."
+                  : "Registralos cuando quieras para calcular tu ahorro."}
             </Text>
           </View>
           <TouchableOpacity
             onPress={openIncomeModal}
             activeOpacity={0.7}
-            disabled={incomeRegisteredThisMonth}
-            style={[
-              styles.incomeActionButton,
-              incomeRegisteredThisMonth && styles.incomeActionButtonDisabled,
-            ]}
+            style={styles.incomeActionButton}
           >
-            <Text
-              style={[
-                styles.incomeActionButtonText,
-                incomeRegisteredThisMonth &&
-                  styles.incomeActionButtonTextDisabled,
-              ]}
-            >
-              {incomeRegisteredThisMonth ? "Registrados ✓" : "+ Registrar"}
+            <Text style={styles.incomeActionButtonText}>
+              {incomeRegisteredThisMonth
+                ? "Editar ingreso"
+                : income > 0
+                  ? "Cambiar"
+                  : "+ Registrar ingreso"}
             </Text>
           </TouchableOpacity>
         </View>
@@ -505,8 +528,6 @@ export default function AnalisisScreen() {
         {/* EVOLUCIÓN */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionTitle}>Evolución de gastos</Text>
-
-          <Text style={styles.periodText}>Últimos meses</Text>
         </View>
 
         <View style={styles.evolutionCard}>
@@ -746,18 +767,10 @@ const styles = StyleSheet.create({
     flexShrink: 0,
   },
 
-  incomeActionButtonDisabled: {
-    backgroundColor: "#DBEAFE",
-  },
-
   incomeActionButtonText: {
     color: "#FFFFFF",
     fontSize: 12,
     fontWeight: "600",
-  },
-
-  incomeActionButtonTextDisabled: {
-    color: "#1D4ED8",
   },
 
   incomeHelperText: {

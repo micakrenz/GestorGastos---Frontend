@@ -6,7 +6,13 @@ export type User = { id: number; name: string; email: string; onboardingComplete
 export type GoalMovement = { id: number; amount: number; type: "ADD" | "SUBTRACT"; date: string; note: string };
 export type Goal = { id: number; title: string; target: number; current: number; movements: GoalMovement[] };
 export type Budget = { monthly: number; categories: Record<string, number> };
-export type MonthlyIncome = { year: number; month: number; amount: number; registered: boolean };
+export type MonthlyIncome = {
+  year: number;
+  month: number;
+  amount: number;
+  registered: boolean;
+  inheritedFrom: { year: number; month: number } | null;
+};
 
 const TOKEN_KEY = "gestor-gastos-session-token";
 const LEGACY_INCOME_KEY = "gestor-gastos-ingresos";
@@ -165,7 +171,7 @@ export async function getIncome(year?: number, month?: number) {
   const period = year !== undefined && month !== undefined ? { year, month } : currentPeriod();
   const income = await request<MonthlyIncome>(`/api/incomes/${period.year}/${period.month}`);
   const current = currentPeriod();
-  if (income.registered || period.year !== current.year || period.month !== current.month) return income;
+  if (income.registered || income.inheritedFrom || period.year !== current.year || period.month !== current.month) return income;
 
   // Migra una sola vez los ingresos del mes actual guardados por la versión anterior del front.
   const [legacyAmount, legacyMonth] = await Promise.all([
@@ -186,7 +192,7 @@ export async function getIncome(year?: number, month?: number) {
 export async function saveIncome(amount: number, year?: number, month?: number) {
   const period = year !== undefined && month !== undefined ? { year, month } : currentPeriod();
   return request<MonthlyIncome>(`/api/incomes/${period.year}/${period.month}`, {
-    method: "POST",
+    method: "PUT",
     body: JSON.stringify({ amount: Number(amount) }),
   });
 }
